@@ -10,6 +10,7 @@ from datetime import datetime
 
 from sqlalchemy import text, create_engine
 from sqlalchemy.orm import Session
+import uuid
 
 # ─── Database access helper ────────────────────────────────────────────────
 # Engine is set by the API on init
