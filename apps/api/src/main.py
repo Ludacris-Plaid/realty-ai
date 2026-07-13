@@ -199,25 +199,92 @@ async def seed_database():
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             conn.commit()
         
-        # Import and run seed — try local path first, then Docker path
-        _seed_paths = [
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "database", "seed.py"),
-            "/packages/database/seed.py",
-        ]
-        _seed_path = None
-        for sp in _seed_paths:
-            if os.path.exists(sp):
-                _seed_path = sp
-                break
-        if not _seed_path:
-            raise FileNotFoundError(f"seed.py not found at {_seed_paths}")
-        sys.path.insert(0, os.path.dirname(os.path.dirname(_seed_path)))  # add packages/database/src to path
-        sys.path.insert(0, os.path.dirname(_seed_path))
-        seed_ns = {"__name__": "__main__"}
-        exec(open(_seed_path).read(), seed_ns)
+        # Create tables from models
+        from src.base import Base
+        from src.models import User, Lead, Property, AgentProfile, Client, Document, Conversation, Message, AIMemory, Workflow, WorkflowStep
+        Base.metadata.create_all(engine)
+        
+        # Seed data
+        import uuid
+        from datetime import datetime
+        
+        with Session(engine) as session:
+            # Check if already seeded
+            existing = session.execute(text("SELECT COUNT(*) FROM leads")).scalar()
+            if existing and existing > 0:
+                return {"status": "already_seeded", "count": existing}
+            
+            org_id = uuid.uuid4()
+            agent_id = uuid.uuid4()
+            
+            agent = User(
+                id=agent_id, brokerage_id=org_id, email="sarah@eliterealty.com",
+                full_name="Sarah Chen", password_hash="seed-user-no-login",
+                role="agent", created_at=datetime.utcnow(),
+            )
+            session.add(agent)
+            
+            profile = AgentProfile(
+                id=uuid.uuid4(), user_id=agent_id,
+                brokerage_name="Edmonton Elite Realty",
+                brokerage_phone="(555) 123-4567",
+                license_number="RE12345", created_at=datetime.utcnow(),
+            )
+            session.add(profile)
+            
+            leads = [
+                Lead(id=uuid.uuid4(), first_name="Mike", last_name="Chen", email="mike.chen@email.com",
+                     phone="(555) 111-2222", source="ZILLOW", status="NEW",
+                     budget=720000, location_interest="Windermere", property_type_interest="Single Family",
+                     timeline="Immediate", pre_approved=True, ai_score=92, ai_score_reason="Cash buyer, pre-approved, immediate timeline",
+                     notes="Pre-approved, cash buyer, ready to close.", created_at=datetime.utcnow()),
+                Lead(id=uuid.uuid4(), first_name="John", last_name="Smith", email="john.smith@email.com",
+                     phone="(555) 222-3333", source="REFERRAL", status="QUALIFYING",
+                     budget=550000, location_interest="Ambleside", property_type_interest="Townhouse",
+                     timeline="30 days", pre_approved=True, ai_score=87, ai_score_reason="Pre-approved, referred by past client",
+                     notes="Pre-approved, active within 30 days, responds quickly.", created_at=datetime.utcnow()),
+                Lead(id=uuid.uuid4(), first_name="Emily", last_name="Davis", email="emily.davis@email.com",
+                     phone="(555) 333-4444", source="WEBSITE", status="QUALIFIED",
+                     budget=850000, location_interest="Rutherford", property_type_interest="Single Family",
+                     timeline="60 days", pre_approved=True, ai_score=78, ai_score_reason="Referred by past client, pre-approved",
+                     notes="Referred by past client, pre-approved, specific requirements.", created_at=datetime.utcnow()),
+                Lead(id=uuid.uuid4(), first_name="Robert", last_name="Wilson", email="robert.wilson@email.com",
+                     phone="(555) 444-5555", source="REDFIN", status="CONTACTED",
+                     budget=620000, location_interest="Keswick", property_type_interest="Duplex",
+                     timeline="45 days", pre_approved=False, ai_score=55, ai_score_reason="Attended open house, needs pre-approval",
+                     notes="Attended open house, needs pre-approval, moderate interest.", created_at=datetime.utcnow()),
+                Lead(id=uuid.uuid4(), first_name="Sarah", last_name="Johnson", email="sarah.j@email.com",
+                     phone="(555) 555-6666", source="ZILLOW", status="NEW",
+                     budget=350000, location_interest="Laurier Heights", property_type_interest="Condo",
+                     timeline="90 days", pre_approved=False, ai_score=45, ai_score_reason="Early stage, no pre-approval yet",
+                     notes="Early stage, no pre-approval yet.", created_at=datetime.utcnow()),
+            ]
+            for l in leads:
+                session.add(l)
+            
+            props = [
+                Property(id=uuid.uuid4(), address_street="123 Main St", address_city="Edmonton", address_state="AB", address_zip="T5J 1A4",
+                         list_price=549000, beds=4, baths=3, sqft=2200, status="ACTIVE", property_type="Single Family",
+                         year_built=2018, garage_spaces=2, lot_size=5200, description="Beautiful 4-bed family home in mature neighborhood."),
+                Property(id=uuid.uuid4(), address_street="456 Oak Ave", address_city="Edmonton", address_state="AB", address_zip="T6H 3K1",
+                         list_price=425000, beds=3, baths=2, sqft=1500, status="ACTIVE", property_type="Townhouse",
+                         year_built=2015, garage_spaces=1, lot_size=2800, description="Modern townhouse with open concept layout."),
+                Property(id=uuid.uuid4(), address_street="789 Pine Cres", address_city="Edmonton", address_state="AB", address_zip="T6W 2P5",
+                         list_price=725000, beds=5, baths=4, sqft=3100, status="PENDING", property_type="Single Family",
+                         year_built=2020, garage_spaces=3, lot_size=6800, description="Spacious executive home in Windermere."),
+                Property(id=uuid.uuid4(), address_street="101 Birch Blvd", address_city="Edmonton", address_state="AB", address_zip="T5R 4E2",
+                         list_price=315000, beds=2, baths=1, sqft=950, status="SOLD", property_type="Condo",
+                         year_built=2005, garage_spaces=1, lot_size=0, description="Well-maintained condo near downtown."),
+            ]
+            for p in props:
+                session.add(p)
+            
+            session.commit()
+        
         return {"status": "seeded", "database": db_url.split("@")[1].split("/")[0]}
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        import traceback
+        return {"status": "error", "detail": f"{e}\n{traceback.format_exc()}"}
 
 
 @app.post("/approvals/{approval_id}/reject")
