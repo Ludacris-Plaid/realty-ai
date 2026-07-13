@@ -14,7 +14,8 @@ Endpoints:
   POST /approvals/{id}/reject  — Reject an action
 """
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Request
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sys, os, json, logging
@@ -54,6 +55,11 @@ from hermes.tools import TOOL_DEFINITIONS
 
 from .config import settings
 from .api.router import api_router
+from .auth import (
+    create_access_token, get_current_user, get_current_user_optional,
+    UserCreate, UserLogin, TokenResponse, UserResponse, TokenPayload,
+    get_user_by_email, create_user, verify_password
+)
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -91,6 +97,59 @@ app.include_router(api_router, prefix="/api/v1")
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ─── Auth ─────────────────────────────────────────────────────────────────────
+
+@app.post("/api/v1/auth/register")
+async def register(body: UserCreate):
+    """Register a new user account. Returns a JWT token."""
+    existing = await get_user_by_email(body.email)
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+    
+    user = await create_user(body.email, body.password, body.name)
+    if not user:
+        raise HTTPException(status_code=500, detail="Failed to create user")
+    
+    token, expires_in = create_access_token(user["id"], user["email"])
+    return {
+        "user": UserResponse(
+            id=user["id"],
+            email=user["email"],
+            name=user["name"],
+            created_at=user["created_at"],
+        ),
+        "token": TokenResponse(access_token=token, expires_in=expires_in),
+    }
+
+
+@app.post("/api/v1/auth/login")
+async def login(body: UserLogin):
+    """Authenticate user and return a JWT token."""
+    user = await get_user_by_email(body.email)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    if not await verify_password(body.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    
+    token, expires_in = create_access_token(user["id"], user["email"])
+    return {
+        "user": UserResponse(
+            id=user["id"],
+            email=user["email"],
+            name=user["name"],
+            created_at=user["created_at"],
+        ),
+        "token": TokenResponse(access_token=token, expires_in=expires_in),
+    }
+
+
+@app.get("/api/v1/auth/me")
+async def me(current_user = Depends(get_current_user)):
+    """Get the current authenticated user's profile."""
+    return current_user
 
 
 # ─── AI ──────────────────────────────────────────────────────────────────────
@@ -369,10 +428,13 @@ def _get_athena():
 
 
 @app.post("/api/v1/athena/chat")
-async def athena_chat(query: AIQuery):
+async def athena_chat(query: AIQuery, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Chat with Athena — your digital secretary. She controls the entire system via natural language."""
     agent = _get_athena()
     result = agent.chat(query.message)
+    # Associate the authenticated user (if any) for proactive features / personalization
+    if isinstance(result, dict):
+        result.setdefault("user_id", current_user.sub if current_user else None)
     return result
 
 
