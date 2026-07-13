@@ -15,8 +15,9 @@ import logging
 import uuid
 from typing import Optional
 
+from functools import partial
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.tools import tool
+from langchain_core.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 
 from .memory import profile_summary as sqlite_profile_summary, remember, recall, save_conversation, search_conversations, consolidate as consolidate_memory, get_or_create_active_conversation, save_message, get_conversation_messages, reset_conversation as reset_conversation_db, list_conversations
@@ -38,14 +39,12 @@ logger = logging.getLogger(__name__)
 _built_tools = []
 
 def _make_tool_func(tool_name: str, tool_desc: str):
-    """Create a single tool function with its own closure (avoids loop-variable capture)."""
-    @tool
-    def _inner(**kwargs):
-        """Execute a system tool."""
-        return execute_tool(tool_name, kwargs)
-    _inner.__name__ = tool_name
-    _inner.__doc__ = tool_desc
-    return _inner
+    """Create a LangChain StructuredTool with explicitly bound name (avoids closure bugs)."""
+    return StructuredTool.from_function(
+        func=partial(execute_tool, tool_name),
+        name=tool_name,
+        description=tool_desc,
+    )
 
 def _build_tools():
     """Create LangChain Tool objects from tool definitions."""
