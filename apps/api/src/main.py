@@ -199,9 +199,20 @@ async def seed_database():
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             conn.commit()
         
-        # Import and run seed
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "database"))
-        exec(open(os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "database", "seed.py")).read())
+        # Import and run seed — try local path first, then Docker path
+        _seed_paths = [
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "database", "seed.py"),
+            "/packages/database/seed.py",
+        ]
+        _seed_path = None
+        for sp in _seed_paths:
+            if os.path.exists(sp):
+                _seed_path = sp
+                break
+        if not _seed_path:
+            raise FileNotFoundError(f"seed.py not found at {_seed_paths}")
+        sys.path.insert(0, os.path.dirname(_seed_path))
+        exec(open(_seed_path).read())
         return {"status": "seeded", "database": db_url.split("@")[1].split("/")[0]}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
