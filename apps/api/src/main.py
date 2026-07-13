@@ -205,16 +205,19 @@ async def seed_database():
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             conn.commit()
         
-        # Import models — database editable install is at /packages/database/src
-        # Must add to sys.path BEFORE the empty-string entry (which resolves to API's own src/)
-        _db_pkg = "/packages/database/src"
-        if os.path.isdir(_db_pkg):
-            # Remove empty string (resolves to CWD which shadows the database package)
-            sys.path = [p for p in sys.path if p]
-            sys.path.insert(0, _db_pkg)
-        
-        from src.base import Base
-        from src.models import User, Lead, Property, AgentProfile, Client, Document, Conversation, Message, AIMemory, Workflow, WorkflowStep
+        # Import models — database src/ is in PYTHONPATH via Dockerfile
+        # Use direct import (not src. prefix) because /packages/database/src IS the package root
+        try:
+            from base import Base
+            from models import User, Lead, Property, AgentProfile, Client, Document, Conversation, Message, AIMemory, Workflow, WorkflowStep
+        except ImportError:
+            # Fallback: Docker may have different layout — add src/ to path
+            _db_pkg = "/packages/database/src"
+            if os.path.isdir(_db_pkg):
+                sys.path = [p for p in sys.path if p]
+                sys.path.insert(0, _db_pkg)
+            from base import Base
+            from models import User, Lead, Property, AgentProfile, Client, Document, Conversation, Message, AIMemory, Workflow, WorkflowStep
         Base.metadata.create_all(engine)
         
         # Create activities and approvals tables (raw SQL — not yet in ORM models)
