@@ -163,67 +163,31 @@ class AthenaAgent:
         self._prompt = SYSTEM_PROMPT
         logger.info(f"Athena initialized. Session: {self.session_id}, Model: {self.model_name}")
     
-    def _build_llm(self, model_name: str) -> ChatOpenAI:
-        """Try providers in order until one works. Returns first working LLM."""
-        providers = [
-            # Tier 0: OpenCode Zen (free, stable URL)
-            {
-                "base": os.environ.get("OPENCODE_ZEN_API_BASE", "https://opencode.ai/zen/v1") if os.environ.get("OPENCODE_ZEN_API_BASE") else os.environ.get("LLM_API_BASE", "https://opencode.ai/zen/v1"),
-                "key": os.environ.get("OPENCODE_ZEN_API_KEY", "") or os.environ.get("LLM_API_KEY", ""),
-                "model": model_name,
-            },
-            # Tier 1: 9router tunnel
-            {
-                "base": os.environ.get("LLM_FALLBACK_API_BASE", ""),
-                "key": os.environ.get("LLM_FALLBACK_API_KEY", ""),
-                "model": os.environ.get("LLM_FALLBACK_MODEL", model_name),
-            },
-            # Tier 2: Featherless
-            {
-                "base": os.environ.get("LLM_FALLBACK2_API_BASE", "https://api.featherless.ai/v1"),
-                "key": os.environ.get("LLM_FALLBACK2_API_KEY", ""),
-                "model": os.environ.get("LLM_FALLBACK2_MODEL", model_name),
-            },
-            # Tier 3: NVIDIA
-            {
-                "base": os.environ.get("LLM_FALLBACK3_API_BASE", "https://integrate.api.nvidia.com/v1"),
-                "key": os.environ.get("LLM_FALLBACK3_API_KEY", ""),
-                "model": os.environ.get("LLM_FALLBACK3_MODEL", "meta/llama-3.1-8b-instruct"),
-            },
-        ]
-        
-        for p in providers:
-            if not p["base"] or not p["key"]:
-                continue
-            try:
-                llm = ChatOpenAI(
-                    model=p["model"],
-                    base_url=p["base"],
-                    api_key=p["key"],
-                    temperature=0.3,
-                    max_tokens=4096,
-                )
-                # Quick health check
-                import httpx
-                r = httpx.get(f"{p['base'].rstrip('/')}/models",
-                             headers={"Authorization": f"Bearer {p['key']}"},
-                             timeout=3)
-                if r.status_code == 200:
-                    logger.info(f"Athena LLM connected: {p['base']} / {p['model']}")
-                    return llm
-            except Exception as e:
-                logger.warning(f"Athena LLM tier failed ({p['base']}): {e}")
-                continue
-        
-        # Absolute fallback — return opencode-zen anyway
-        logger.warning("All LLM tiers failed, using opencode-zen as last resort")
-        return ChatOpenAI(
-            model=model_name,
-            base_url=os.environ.get("OPENCODE_ZEN_API_BASE", "https://opencode.ai/zen/v1"),
-            api_key=os.environ.get("OPENCODE_ZEN_API_KEY", ""),
-            temperature=0.3,
-            max_tokens=4096,
-        )
+    def _build_llm(self, model_name: str):
+        """Build a self-healing LLM over the free-provider pool.
+
+        Replaces the old static tier list with ResilientLLM, which rotates
+        across every enabled free provider and falls through on ANY failure
+        (timeout, 429 rate-limit, 5xx, auth). This keeps Athena answering even
+        when several providers are down or throttled.
+        """
+        try:
+            from free_llm import build_resilient_llm
+            llm = build_resilient_llm(model_name=model_name, temperature=0.3, max_tokens=4096)
+            logger.info(
+                "Athena LLM: resilient free-provider pool initialised "
+                f"({len(llm._providers)} providers enabled)"
+            )
+            return llm
+        except Exception as e:
+            logger.error(f"ResilientLLM init failed, falling back to opencode-zen: {e}")
+            return ChatOpenAI(
+                model=model_name,
+                base_url=os.environ.get("OPENCODE_ZEN_API_BASE", "https://opencode.ai/zen/v1"),
+                api_key=os.environ.get("OPENCODE_ZEN_API_KEY", "") or os.environ.get("LLM_API_KEY", ""),
+                temperature=0.3,
+                max_tokens=4096,
+            )
     
     def _parse_xml_tool_calls(self, text: str) -> tuple[str, list[dict]]:
         """Parse hy3-free's homemade XML tool-call syntax from response text.
@@ -415,6 +379,7 @@ class AthenaAgent:
             return {
                 "response": response_text,
                 "model_used": self.model_name,
+                "provider": getattr(self.llm, "last_provider", None),
                 "tool_calls": str(tool_calls_used)[:200] if tool_calls_used else [],
                 "conversation_id": self.conversation_id,
             }
