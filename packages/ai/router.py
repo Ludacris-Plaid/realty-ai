@@ -17,7 +17,7 @@ for the caller to use with get_model().
 """
 from typing import Optional
 
-from models import get_model, MODEL_LOCAL, MODEL_PREMIUM, MODEL_FAST
+from models import get_model, get_local_model, get_premium_model, get_fast_model
 
 
 # ─── Privacy Keywords ────────────────────────────────────────────────────────
@@ -55,17 +55,17 @@ def classify_task(message: str) -> str:
     # Rule 1: Private/sensitive data → local model only
     for kw in _PRIVATE_KEYWORDS:
         if kw in msg_lower:
-            return MODEL_LOCAL
+            return get_local_model()
 
     # Rule 2: Long or complex → premium model
     if len(message) > 500:
-        return MODEL_PREMIUM
+        return get_premium_model()
     for kw in _COMPLEX_KEYWORDS:
         if kw in msg_lower:
-            return MODEL_PREMIUM
+            return get_premium_model()
 
     # Rule 3: Everything else → fast model
-    return MODEL_FAST
+    return get_fast_model()
 
 
 def get_routed_model(message: str, override: Optional[str] = None):
@@ -85,9 +85,9 @@ def get_routed_model(message: str, override: Optional[str] = None):
 def get_router_stats() -> dict:
     """Return router configuration for debugging."""
     return {
-        "local_model": MODEL_LOCAL,
-        "premium_model": MODEL_PREMIUM,
-        "fast_model": MODEL_FAST,
+        "local_model": get_local_model(),
+        "premium_model": get_premium_model(),
+        "fast_model": get_fast_model(),
         "private_keywords": _PRIVATE_KEYWORDS,
         "complex_keywords": _COMPLEX_KEYWORDS,
         "litellm_base": __import__("os").getenv("LLM_API_BASE", "http://localhost:4000"),

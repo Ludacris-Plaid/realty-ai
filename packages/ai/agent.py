@@ -12,7 +12,10 @@ The Supervisor classifies intent and routes to the right agent:
   - Document Agent: contract analysis, RAG
   - Research Agent: market trends, neighborhoods
   - General Assistant: fallback for anything else
+
+Provider fallback: Featherless → NVIDIA on capacity/rate-limit errors.
 """
+import logging
 from typing import Optional
 
 from langgraph.prebuilt import create_react_agent
@@ -20,22 +23,27 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from tools import ALL_TOOLS
 from prompts import SYSTEM_PROMPT
-from models import get_model, MODEL_FAST
+from models import get_model, get_fast_model, get_primary_model, get_fallback_model, _enable_fallback
 from router import classify_task
 from agents.supervisor import route, get_agent_tools, AGENT_REGISTRY
 from activity import record_activity
 
+logger = logging.getLogger(__name__)
 
 # ─── Base Agent Factory ─────────────────────────────────────────────────────
 
-def build_agent(model_name: Optional[str] = None, extra_tools: Optional[list] = None):
+def build_agent(model_name: Optional[str] = None, extra_tools: Optional[list] = None, force_fallback: bool = False):
     """Create a ReAct agent with domain-specific tools.
     
     Args:
-        model_name: LiteLLM model name.
+        model_name: Model ID override.
         extra_tools: Additional tools for this specialist agent.
+        force_fallback: Use NVIDIA fallback instead of primary provider.
     """
-    llm = get_model(model_name or MODEL_FAST)
+    if force_fallback:
+        llm = get_fallback_model()
+    else:
+        llm = get_model(model_name or get_fast_model())
     tools = list(ALL_TOOLS)
     if extra_tools:
         tools.extend(extra_tools)
@@ -56,6 +64,8 @@ def ask(message: str, override_model: Optional[str] = None) -> dict:
     3. Executes and returns the response
     4. Records the activity
     
+    Falls back to NVIDIA if Featherless returns capacity/rate-limit errors.
+    
     Args:
         message: The user's message.
         override_model: Force a specific model.
@@ -71,12 +81,26 @@ def ask(message: str, override_model: Optional[str] = None) -> dict:
     specialist_tools = get_agent_tools(decision.intent)
     task_agent = build_agent(model_name, extra_tools=specialist_tools)
 
-    # Step 3: Execute
-    result = task_agent.invoke(
-        {"messages": [HumanMessage(content=message)]}
-    )
-    messages = result["messages"]
+    # Step 3: Execute with fallback on capacity/rate-limit errors
+    try:
+        result = task_agent.invoke(
+            {"messages": [HumanMessage(content=message)]}
+        )
+    except Exception as e:
+        err_str = str(e).lower()
+        # Check for Featherless capacity/rate-limit errors
+        if any(x in err_str for x in ["capacity", "rate limit", "concurrency limit", "model_switching", "503", "429"]):
+            logger.warning(f"Featherless failed ({err_str[:80]}), retrying with NVIDIA fallback")
+            _enable_fallback(duration_seconds=120)
+            fallback_agent = build_agent(model_name, extra_tools=specialist_tools, force_fallback=True)
+            result = fallback_agent.invoke(
+                {"messages": [HumanMessage(content=message)]}
+            )
+            model_name = f"{model_name} (via NVIDIA)"
+        else:
+            raise
 
+    messages = result["messages"]
     response_text = ""
     for msg in reversed(messages):
         if isinstance(msg, AIMessage) and msg.content:

@@ -6,9 +6,9 @@ class Settings(BaseSettings):
     debug: bool = True
     database_url: str = "postgresql+asyncpg://realty:realty_local_dev@localhost:5433/realty_ai"
     redis_url: str = "redis://localhost:6379/0"
-    llm_api_base: str = "http://localhost:8000/v1"
-    llm_api_key: str = "not-needed"
-    llm_default_model: str = "openai/gpt-4o-mini"
+    llm_api_base: str = "https://api.featherless.ai/v1"
+    llm_api_key: str = "rc_39469c71f02a6f4d905bace1fff05adee3228beca9a0ddb85898ea20438d8435"
+    llm_default_model: str = "unsloth/Qwen2.5-7B-Instruct"
     cors_origins: str = "http://localhost:3000"
     auth_secret_key: str = "change-me-in-production"
     auth_algorithm: str = "HS256"
