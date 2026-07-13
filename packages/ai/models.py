@@ -1,13 +1,16 @@
 """
-RealtyAI — Model Gateway with Fallback Chain.
+RealtyAI — Model Gateway with Gentle Cascading Fallback.
 
-Primary: Featherless.ai API (open-source models < 15B)
-Fallback: NVIDIA API (when Featherless is at capacity or rate-limited)
+Primary:  9router tunnel proxy (ocg/kimi-k2.6 — fast, low-cost)
+Fallback 1: Featherless.ai (Qwen3-4B-Instruct)
+Fallback 2: NVIDIA API (Llama-3.1-8B-Instruct)
 
-Both providers use OpenAI-compatible API format.
+Each level falls through ONLY on total failure (timeout, auth, down).
+Rate limits and concurrency caps do NOT trigger fallback — they retry.
 """
 import os
 import logging
+import time
 from typing import Optional
 from datetime import datetime, timedelta
 
@@ -17,79 +20,168 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
-# ─── Config (lazy-loaded from env) ────────────────────────────────────────────
+# ─── Config ───────────────────────────────────────────────────────────────────
 
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
-# Primary: Featherless
-def get_featherless_base() -> str:
-    return _env("LLM_API_BASE", "https://api.featherless.ai/v1")
+# Tier 1: 9router tunnel (primary)
+def get_tunnel_base() -> str:
+    return _env("LLM_API_BASE", "https://r9tgp4c.abc-tunnel.us/v1")
 
-def get_featherless_key() -> str:
+def get_tunnel_key() -> str:
     return _env("LLM_API_KEY", "")
 
-# Fallback: NVIDIA
-def get_nvidia_base() -> str:
-    return _env("LLM_FALLBACK_API_BASE", "https://integrate.api.nvidia.com/v1")
+# Tier 2: Featherless
+def get_featherless_base() -> str:
+    return _env("LLM_FALLBACK_API_BASE", "https://api.featherless.ai/v1")
 
-def get_nvidia_key() -> str:
+def get_featherless_key() -> str:
     return _env("LLM_FALLBACK_API_KEY", "")
 
+# Tier 3: NVIDIA (last resort)
+def get_nvidia_base() -> str:
+    return _env("LLM_FALLBACK2_API_BASE", "https://integrate.api.nvidia.com/v1")
+
+def get_nvidia_key() -> str:
+    return _env("LLM_FALLBACK2_API_KEY", "")
+
 def get_nvidia_model() -> str:
-    return _env("LLM_FALLBACK_MODEL", "meta/llama-3.1-8b-instruct")
+    return _env("LLM_FALLBACK2_MODEL", "meta/llama-3.1-8b-instruct")
 
 # Model names
 def get_fast_model() -> str:
-    return _env("LLM_DEFAULT_MODEL", "Qwen/Qwen3-4B-Instruct-2507")
+    return _env("LLM_DEFAULT_MODEL", "ocg/kimi-k2.6")
 
 def get_premium_model() -> str:
-    return _env("LLM_PREMIUM_MODEL", "unsloth/Phi-4-mini-instruct")
+    return _env("LLM_PREMIUM_MODEL", "ocg/deepseek-v4-flash")
 
 def get_local_model() -> str:
-    return _env("LLM_LOCAL_MODEL", "unsloth/gemma-2-2b-it")
+    return _env("LLM_LOCAL_MODEL", "ocg/mimo-v2.5-pro")
 
 
-# ─── Fallback State ────────────────────────────────────────────────────────────
+# ─── Tiered Fallback State ─────────────────────────────────────────────────────
 
-_fallback_until: Optional[datetime] = None
+_fallback_level = 0  # 0=tunnel, 1=featherless, 2=nvidia
 
-def _should_use_fallback() -> bool:
-    """Check if we're in fallback mode (after recent Featherless failure)."""
-    global _fallback_until
-    if _fallback_until is None:
+def _check_provider(base_url: str, api_key: str, timeout: int = 3) -> bool:
+    """Check if a provider is reachable."""
+    if not api_key:
         return False
-    if datetime.utcnow() < _fallback_until:
-        return True
-    _fallback_until = None
-    return False
-
-def _enable_fallback(duration_seconds: int = 120):
-    """Switch to fallback provider for a duration."""
-    global _fallback_until
-    _fallback_until = datetime.utcnow() + timedelta(seconds=duration_seconds)
-    logger.warning(f"Featherless failed, falling back to NVIDIA for {duration_seconds}s")
+    try:
+        r = httpx.get(f"{base_url.rstrip('/')}/models",
+                      headers={"Authorization": f"Bearer {api_key}"},
+                      timeout=timeout)
+        return r.status_code == 200
+    except Exception:
+        return False
 
 
-# ─── Model Factory with Fallback ───────────────────────────────────────────────
+# ─── Model Factory with Gentle Fallback ────────────────────────────────────────
 
 def get_model(model_name: Optional[str] = None) -> ChatOpenAI:
-    """Get ChatOpenAI using primary (Featherless) or fallback (NVIDIA) provider.
+    """Get ChatOpenAI with cascading fallback. Each tier is tried silently.
     
-    Auto-falls back to NVIDIA when Featherless returns capacity/rate-limit errors.
-    Once in fallback, stays there for 2 minutes before retrying Featherless.
+    - Tier 1: 9router tunnel (primary)
+    - Tier 2: Featherless (if tunnel unreachable)
+    - Tier 3: NVIDIA (last resort, rarely used)
     
-    Args:
-        model_name: Model ID override. For fallback, uses NVIDIA's configured model.
+    Does NOT fallback on rate limits, concurrency, or model-specific errors.
+    Only falls through on complete provider failure (auth, DNS, timeout).
     """
-    if _should_use_fallback() or not get_featherless_key():
-        # Use NVIDIA fallback — ignore model_name, force NVIDIA's model
+    global _fallback_level
+    
+    model = model_name or get_fast_model()
+    
+    # Try each tier in order, starting from current level
+    for level in range(_fallback_level, 3):
+        if level == 0:
+            base, key = get_tunnel_base(), get_tunnel_key()
+        elif level == 1:
+            base, key = get_featherless_base(), get_featherless_key()
+        else:
+            base, key = get_nvidia_base(), get_nvidia_key()
+            model = get_nvidia_model()
+        
+        if not key:
+            continue
+        
+        # Quick health check — skip if dead
+        try:
+            r = httpx.get(f"{base.rstrip('/')}/models",
+                         headers={"Authorization": f"Bearer {key}"},
+                         timeout=2)
+            if r.status_code != 200:
+                _fallback_level = min(level + 1, 2)
+                continue
+        except Exception:
+            _fallback_level = min(level + 1, 2)
+            continue
+        
+        # Provider is alive — use it
+        _fallback_level = level  # Reset to this working tier
         return ChatOpenAI(
-            model=get_nvidia_model(),
-            base_url=get_nvidia_base(),
-            api_key=get_nvidia_key(),
+            model=model,
+            base_url=base,
+            api_key=key,
             temperature=0.2,
         )
+    
+    # All providers failed — return tunnel anyway (will get a clear error)
+    return ChatOpenAI(
+        model=model,
+        base_url=get_tunnel_base(),
+        api_key=get_tunnel_key(),
+        temperature=0.2,
+    )
+
+
+# ─── Direct Provider Access ────────────────────────────────────────────────────
+
+def get_primary_model(model_name: Optional[str] = None) -> ChatOpenAI:
+    """Tunnel only (no fallback)."""
+    return ChatOpenAI(
+        model=model_name or get_fast_model(),
+        base_url=get_tunnel_base(),
+        api_key=get_tunnel_key(),
+        temperature=0.2,
+    )
+
+def get_fallback_model() -> ChatOpenAI:
+    """NVIDIA only."""
+    return ChatOpenAI(
+        model=get_nvidia_model(),
+        base_url=get_nvidia_base(),
+        api_key=get_nvidia_key(),
+        temperature=0.2,
+    )
+
+
+# ─── Health Check ──────────────────────────────────────────────────────────────
+
+def is_proxy_available() -> bool:
+    """Check if the 9router tunnel is reachable."""
+    try:
+        r = httpx.get(f"{get_tunnel_base()}/models",
+                      headers={"Authorization": f"Bearer {get_tunnel_key()}"},
+                      timeout=5)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def list_available_models() -> list[str]:
+    """Fetch available models from the tunnel."""
+    try:
+        r = httpx.get(f"{get_tunnel_base()}/models",
+                      headers={"Authorization": f"Bearer {get_tunnel_key()}"},
+                      timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            return [m["id"] for m in data.get("data", [])]
+        return []
+    except Exception:
+        return []
 
     # Use Featherless primary
     return ChatOpenAI(

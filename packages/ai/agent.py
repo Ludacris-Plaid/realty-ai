@@ -81,24 +81,36 @@ def ask(message: str, override_model: Optional[str] = None) -> dict:
     specialist_tools = get_agent_tools(decision.intent)
     task_agent = build_agent(model_name, extra_tools=specialist_tools)
 
-    # Step 3: Execute with fallback on capacity/rate-limit errors
+    # Step 3: Execute — gentle fallback (no hard crash)
     try:
         result = task_agent.invoke(
             {"messages": [HumanMessage(content=message)]}
         )
     except Exception as e:
         err_str = str(e).lower()
-        # Check for Featherless capacity/rate-limit errors
-        if any(x in err_str for x in ["capacity", "rate limit", "concurrency limit", "model_switching", "503", "429"]):
-            logger.warning(f"Featherless failed ({err_str[:80]}), retrying with NVIDIA fallback")
-            _enable_fallback(duration_seconds=120)
+        logger.warning(f"Primary model failed ({err_str[:100]}), trying fallback")
+        # Try NVIDIA fallback silently (no hard crash if it also fails)
+        try:
             fallback_agent = build_agent(model_name, extra_tools=specialist_tools, force_fallback=True)
             result = fallback_agent.invoke(
                 {"messages": [HumanMessage(content=message)]}
             )
-            model_name = f"{model_name} (via NVIDIA)"
-        else:
-            raise
+            model_name = f"{model_name} (via fallback)"
+        except Exception as e2:
+            # Both providers failed — return graceful error, not a crash
+            record_activity(
+                agent_name=decision.agent_name,
+                action=message[:120],
+                intent=decision.intent,
+                model_used="failed",
+                status=f"error: both providers failed",
+            )
+            return {
+                "messages": [],
+                "response": "Both providers are unavailable right now. Please try again in a moment.",
+                "model_used": "failed",
+                "supervisor": decision.to_dict(),
+            }
 
     messages = result["messages"]
     response_text = ""

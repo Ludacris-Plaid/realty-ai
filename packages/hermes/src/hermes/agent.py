@@ -95,11 +95,11 @@ After each conversation, you should:
 class HermesAgent:
     """Persistent agent that learns, grows, and controls the RealtyAI system."""
     
-    def __init__(self, db_engine=None, model_name: str = "Qwen/Qwen3-4B-Instruct-2507"):
+    def __init__(self, db_engine=None, model_name: str = None):
         self.agent_id = "hermes-main"
         self.user_name = None
         self.session_id = str(uuid.uuid4())
-        self.model_name = model_name
+        self.model_name = model_name or os.environ.get("HERMES_MODEL", "ocg/deepseek-v4-flash")
         self.conversation_count = 0
         
         # Set up DB engine for tools
@@ -109,14 +109,15 @@ class HermesAgent:
         # Build LangChain tools
         self.tools = _build_tools()
         
-        # Build the LLM
-        api_base = os.environ.get("LLM_API_BASE", "https://api.featherless.ai/v1")
-        api_key = os.environ.get("LLM_API_KEY", "")
+        # Build the LLM — use 9router tunnel primary, with cascading fallback
+        api_base = os.environ.get("LLM_API_BASE", "https://r9tgp4c.abc-tunnel.us/v1")
+        api_key = os.environ.get("LLM_API_KEY", "sk-e91edbef3cf0c243-99tuly-7e99243d")
         self.llm = ChatOpenAI(
-            model=model_name,
+            model=self.model_name,
             base_url=api_base,
             api_key=api_key,
             temperature=0.3,
+            max_tokens=4096,  # Large enough for reasoning models
         )
         
         # Bind tools to the LLM
@@ -146,6 +147,15 @@ class HermesAgent:
             response = self.llm_with_tools.invoke(messages)
             messages.append(response)
             
+            # Extract response — handle reasoning models (DeepSeek puts content in reasoning_content)
+            response_text = ""
+            if hasattr(response, 'content') and response.content:
+                response_text = response.content
+            elif hasattr(response, 'additional_kwargs') and response.additional_kwargs.get('reasoning_content'):
+                response_text = response.additional_kwargs['reasoning_content']
+            elif hasattr(response, 'response_metadata') and response.response_metadata:
+                response_text = str(response.response_metadata.get('message', {}).get('content', ''))
+            
             # Execute any tool calls requested by the model
             if hasattr(response, 'tool_calls') and response.tool_calls:
                 for tc in response.tool_calls:
@@ -162,9 +172,11 @@ class HermesAgent:
                 
                 # Second LLM call with tool results
                 response = self.llm.invoke(messages)
-                messages.append(response)
+                if hasattr(response, 'content') and response.content:
+                    response_text = response.content
             
-            response_text = response.content if hasattr(response, 'content') else str(response)
+            if not response_text:
+                response_text = "I'm here. How can I help you?"
             
             # Post-chat memory consolidation
             self._post_chat_learning(message, response_text, tool_calls_used)
