@@ -31,7 +31,6 @@ ENV PYTHONPATH=\
 /packages/ai:\
 /packages/database/src:\
 /packages/hermes/src:\
-/packages/integrations:\
 /packages/bots/src
 
 # ─── Step 6: Copy API and run ──────────────────────────────────────────
