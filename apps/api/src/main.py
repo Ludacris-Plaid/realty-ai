@@ -194,6 +194,11 @@ async def seed_database():
         db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
         engine = create_engine(db_url)
         
+        # Add database package to path
+        for p in ["/packages/database", "./packages/database"]:
+            if os.path.isdir(p):
+                sys.path.insert(0, p)
+        
         # Create vector extension
         with engine.connect() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
