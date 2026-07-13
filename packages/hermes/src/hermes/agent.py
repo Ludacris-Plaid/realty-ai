@@ -37,6 +37,16 @@ logger = logging.getLogger(__name__)
 
 _built_tools = []
 
+def _make_tool_func(tool_name: str, tool_desc: str):
+    """Create a single tool function with its own closure (avoids loop-variable capture)."""
+    @tool
+    def _inner(**kwargs):
+        """Execute a system tool."""
+        return execute_tool(tool_name, kwargs)
+    _inner.__name__ = tool_name
+    _inner.__doc__ = tool_desc
+    return _inner
+
 def _build_tools():
     """Create LangChain Tool objects from tool definitions."""
     global _built_tools
@@ -44,19 +54,47 @@ def _build_tools():
         return _built_tools
     
     for td in TOOL_DEFINITIONS:
-        name = td["name"]
-        desc = td["description"]
-        
-        @tool
-        def _make_tool(**kwargs):
-            """Execute a system tool."""
-            return execute_tool(name, kwargs)
-        
-        _make_tool.__name__ = name
-        _make_tool.__doc__ = desc
-        _built_tools.append(_make_tool)
+        _built_tools.append(_make_tool_func(td["name"], td["description"]))
     
     return _built_tools
+
+
+# ─── Response sanitization ────────────────────────────────────────────────
+
+import re
+
+def _sanitize_response(text: str) -> str:
+    """Strip tool-call XML artifacts from model responses.
+    
+    Some models (notably hy3-free) emit raw XML-like tool call syntax
+    in the response text. Strip these before returning to the frontend.
+    """
+    if not text:
+        return text
+    
+    # Strip <tool_calls:...>...</tool_calls:...> blocks
+    text = re.sub(r'<tool_calls?:\w+>[^<]*</tool_calls?:\w+>', '', text)
+    
+    # Strip <tool_call:...>...</tool_call:...> blocks
+    text = re.sub(r'<tool_call[^>]*>.*?</tool_call>', '', text, flags=re.DOTALL)
+    
+    # Strip <function_calls>...</function_calls> blocks
+    text = re.sub(r'<function_calls>.*?</function_calls>', '', text, flags=re.DOTALL)
+    
+    # Strip <invoke>...</invoke> blocks (common XML tool format)
+    text = re.sub(r'<invoke>.*?</invoke>', '', text, flags=re.DOTALL)
+    
+    # Strip function_call JSON blocks: {"name": "...", "arguments": {...}}
+    text = re.sub(r'\{"name":\s*"[^"]*",\s*"arguments":\s*\{[^}]*\}\}', '', text)
+    
+    # Strip standalone tool_call_xml tags (self-closing)
+    text = re.sub(r'<tool_calls?:\w+\s*/>', '', text)
+    
+    # Clean up extra whitespace from removals
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    text = text.strip()
+    
+    return text
 
 
 # ─── System prompt ──────────────────────────────────────────────────────────
@@ -276,6 +314,9 @@ class AthenaAgent:
             
             if not response_text:
                 response_text = "I'm here. How can I help you?"
+            
+            # Sanitize: strip XML tool-call artifacts from model output
+            response_text = _sanitize_response(response_text)
             
             # Save assistant response
             tool_calls_str = ", ".join(tool_calls_used) if tool_calls_used else ""
