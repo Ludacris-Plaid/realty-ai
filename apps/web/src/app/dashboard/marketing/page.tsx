@@ -30,7 +30,7 @@ export default function MarketingPage() {
           <h1 className="text-2xl font-bold text-gray-900">Marketing</h1>
           <p className="mt-1 text-sm text-gray-500">AI-powered campaigns, social media, and content</p>
         </div>
-        <Button>
+        <Button onClick={() => alert("AI content generation coming soon in Phase 2. Athena will write your campaigns.")}>
           <Sparkles className="h-4 w-4" /> Generate with AI
         </Button>
       </div>
@@ -78,7 +78,7 @@ export default function MarketingPage() {
                 <CardContent className="flex items-center justify-between p-4">
                   <div className="flex items-center gap-3">
                     <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                      c.status === "active" ? "bg-green-100" : c.status === "draft" ? "bg-gray-100" : "bg-blue-100"
+                      c.status === "active" ? "bg-green-100" : c.status === "draft" ? "bg-gray-100" : "bg-amber-100"
                     }`}>
                       {c.type === "email" ? <Mail className="h-5 w-5" /> : c.type === "social" ? <Share2 className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
                     </div>

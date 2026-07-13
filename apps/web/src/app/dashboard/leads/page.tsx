@@ -13,8 +13,8 @@ const columns = [
   { key: "new", label: "New", color: "bg-gray-100 border-t-gray-400" },
   { key: "qualifying", label: "Qualifying", color: "bg-amber-50 border-t-amber-400" },
   { key: "qualified", label: "Qualified", color: "bg-emerald-50 border-t-emerald-400" },
-  { key: "appointment_set", label: "Appt. Set", color: "bg-amber-50 border-t-violet-400" },
-  { key: "contacted", label: "Contacted", color: "bg-blue-50 border-t-blue-400" },
+  { key: "appointment_set", label: "Appt. Set", color: "bg-amber-50 border-t-amber-400" },
+  { key: "contacted", label: "Contacted", color: "bg-amber-50 border-t-amber-400" },
   { key: "closed_won", label: "Closed Won", color: "bg-emerald-100 border-t-emerald-500" },
   { key: "closed_lost", label: "Closed Lost", color: "bg-red-50 border-t-red-400" },
 ];

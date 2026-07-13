@@ -9,7 +9,7 @@ import { Bot, UserCheck, FileText, BarChart, Megaphone, Search, Shield, Zap, Act
 import { fetchFromApi } from "@/lib/api";
 
 const agentMeta: Record<string, { name: string; description: string; icon: React.ElementType; color: string }> = {
-  lead: { name: "Lead Agent", description: "Qualifies leads, scores pipeline, recommends follow-ups", icon: UserCheck, color: "bg-blue-500" },
+  lead: { name: "Lead Agent", description: "Qualifies leads, scores pipeline, recommends follow-ups", icon: UserCheck, color: "bg-amber-500" },
   listing: { name: "Listing Agent", description: "Generates MLS descriptions, compares properties", icon: FileText, color: "bg-emerald-500" },
   marketing: { name: "Marketing Agent", description: "Creates campaigns, social posts, content", icon: Megaphone, color: "bg-amber-500" },
   transaction: { name: "Transaction Agent", description: "Tracks deadlines, manages contract dates", icon: Shield, color: "bg-amber-500" },

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getListings, type Property } from "@/lib/api";
+import { getListings, fetchFromApi, type Property } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,22 @@ const statusBadge: Record<string, "success" | "warning" | "default" | "secondary
 };
 
 function ListingCard({ property }: { property: Property }) {
+  const [generating, setGenerating] = useState(false);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const res = await fetchFromApi<{ description: string }>(
+        `/api/v1/listings/${property.id}/generate-description`,
+        { method: "POST" }
+      );
+      alert(`AI-generated description:\n\n${res.description?.slice(0, 500) || "Description generated!"}`);
+    } catch (e: any) {
+      alert(`Could not generate description: ${e.message}`);
+    }
+    setGenerating(false);
+  };
+
   return (
     <Card className="overflow-hidden transition-all hover:shadow-lg">
       <div className="relative h-48 bg-gradient-to-br from-brand-100 to-brand-50">
@@ -51,8 +67,8 @@ function ListingCard({ property }: { property: Property }) {
           <span className="flex items-center gap-1"><Move className="h-3.5 w-3.5" /> {property.sqft.toLocaleString()} sqft</span>
         </div>
         <p className="line-clamp-2 text-xs text-gray-400">{property.description}</p>
-        <Button variant="outline" size="sm" className="w-full">
-          <Sparkles className="h-3.5 w-3.5" /> Generate MLS Description
+        <Button variant="outline" size="sm" className="w-full" onClick={handleGenerate} disabled={generating}>
+          <Sparkles className="h-3.5 w-3.5" /> {generating ? "Generating..." : "Generate MLS Description"}
         </Button>
       </CardContent>
     </Card>
@@ -83,7 +99,7 @@ export default function ListingsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Property Listings</h1>
           <p className="mt-1 text-sm text-gray-500">Manage and market your properties</p>
         </div>
-        <Button>
+        <Button onClick={() => alert("Listing creation form coming soon. Use Athena to add listings by voice or chat.")}>
           <Building2 className="h-4 w-4" /> Add Listing
         </Button>
       </div>

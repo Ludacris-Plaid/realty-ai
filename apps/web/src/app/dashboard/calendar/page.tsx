@@ -18,7 +18,7 @@ const events = [
 ];
 
 const eventColors: Record<string, string> = {
-  showing: "bg-blue-100 text-blue-700 border-blue-200",
+  showing: "bg-amber-100 text-amber-700 border-amber-200",
   meeting: "bg-amber-100 text-amber-700 border-amber-200",
   "open-house": "bg-green-100 text-green-700 border-green-200",
   closing: "bg-emerald-100 text-emerald-700 border-emerald-200",
@@ -42,7 +42,7 @@ export default function CalendarPage() {
           <h1 className="text-2xl font-bold text-gray-900">Calendar</h1>
           <p className="mt-1 text-sm text-gray-500">Manage your schedule and appointments</p>
         </div>
-        <Button>
+        <Button onClick={() => alert("Event creation form coming soon. For now, ask Athena to schedule it.")}>
           <Plus className="h-4 w-4" /> Add Event
         </Button>
       </div>

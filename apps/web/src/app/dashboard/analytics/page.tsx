@@ -125,7 +125,7 @@ export default function AnalyticsPage() {
                   const pct = totalLeads > 0 ? ((count as number) / totalLeads) * 100 : 0;
                   const colors: Record<string, string> = {
                     NEW: "bg-gray-400", QUALIFYING: "bg-amber-400", QUALIFIED: "bg-emerald-400",
-                    CONTACTED: "bg-blue-400", APPOINTMENT_SET: "bg-amber-400", CLOSED_WON: "bg-green-500",
+                    CONTACTED: "bg-amber-400", APPOINTMENT_SET: "bg-amber-400", CLOSED_WON: "bg-green-500",
                     CLOSED_LOST: "bg-red-400", DORMANT: "bg-gray-300",
                   };
                   return (

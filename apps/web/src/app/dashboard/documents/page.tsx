@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { getDocuments, type Document } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,10 +10,10 @@ import { FileText, FileSpreadsheet, FileImage, File, Upload, Sparkles, Download,
 import { cn } from "@/lib/utils";
 
 const categoryColors: Record<string, string> = {
-  contract: "bg-blue-100 text-blue-800",
+  contract: "bg-amber-100 text-amber-800",
   disclosure: "bg-amber-100 text-amber-800",
   report: "bg-emerald-100 text-emerald-800",
-  marketing: "bg-amber-100 text-violet-800",
+  marketing: "bg-amber-100 text-amber-800",
   financial: "bg-rose-100 text-rose-800",
   legal: "bg-gray-100 text-gray-800",
 };
@@ -76,6 +76,8 @@ export default function DocumentsPage() {
   const [docs, setDocs] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getDocuments()
@@ -84,15 +86,49 @@ export default function DocumentsPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+      const res = await fetch(`${API_BASE}/api/v1/documents/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      // Refresh document list
+      const updated = await getDocuments();
+      setDocs(updated);
+      setError(null);
+    } catch (e: any) {
+      setError(e.message || "Upload failed");
+    }
+    setUploading(false);
+  };
+
   return (
     <div className="space-y-6">
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFileChange}
+        accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+      />
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Document Vault</h1>
           <p className="mt-1 text-sm text-gray-500">AI-powered document management</p>
         </div>
-        <Button>
-          <Upload className="h-4 w-4" /> Upload Document
+        <Button onClick={handleUploadClick} disabled={uploading}>
+          <Upload className="h-4 w-4" /> {uploading ? "Uploading..." : "Upload Document"}
         </Button>
       </div>
 
@@ -118,7 +154,7 @@ export default function DocumentsPage() {
         <div className="flex flex-col items-center justify-center py-16 text-gray-400">
           <FileText className="h-12 w-12" />
           <p className="mt-4 text-sm">No documents uploaded yet</p>
-          <Button variant="outline" size="sm" className="mt-4">
+          <Button variant="outline" size="sm" className="mt-4" onClick={handleUploadClick}>
             <Upload className="h-4 w-4" /> Upload your first document
           </Button>
         </div>
