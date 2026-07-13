@@ -129,8 +129,8 @@ def remember(key: str, value: str, category: str = "general", confidence: float 
     conn.close()
 
 
-def recall(query: str, top_k: int = 10) -> list[dict]:
-    """Search facts by category/key similarity."""
+def _search_facts(query: str, limit: int = 10) -> list[dict]:
+    """Search user facts table by substring match on key/value/category."""
     conn = _get_db()
     q = f"%{query}%"
     rows = conn.execute("""
@@ -139,12 +139,81 @@ def recall(query: str, top_k: int = 10) -> list[dict]:
         WHERE key LIKE ? OR value LIKE ? OR category LIKE ?
         ORDER BY confidence DESC, updated_at DESC
         LIMIT ?
-    """, (q, q, q, top_k)).fetchall()
+    """, (q, q, q, limit)).fetchall()
     conn.close()
     return [
-        {"key": r[0], "value": r[1], "category": r[2], "confidence": r[3], "source": r[4], "updated_at": r[5]}
+        {"type": "fact", "key": r[0], "content": r[1], "category": r[2],
+         "confidence": r[3], "source": r[4], "updated_at": r[5]}
         for r in rows
     ]
+
+
+def _search_chat_messages(query: str, limit: int = 10) -> list[dict]:
+    """Search chat message content."""
+    conn = _get_db()
+    q = f"%{query}%"
+    rows = conn.execute("""
+        SELECT cm.content, cm.role, cm.created_at, ct.title
+        FROM chat_messages cm
+        JOIN conversation_threads ct ON cm.conversation_id = ct.id
+        WHERE cm.content LIKE ?
+        ORDER BY cm.created_at DESC
+        LIMIT ?
+    """, (q, limit)).fetchall()
+    conn.close()
+    return [
+        {"type": "chat", "content": r[0][:300], "role": r[1],
+         "created_at": r[2], "conversation": r[3] or "Chat"}
+        for r in rows
+    ]
+
+
+def _search_notes(query: str, limit: int = 10) -> list[dict]:
+    """Search notes by title or body."""
+    conn = _get_db()
+    q = f"%{query}%"
+    rows = conn.execute("""
+        SELECT title, body, tags, source, created_at
+        FROM notes WHERE title LIKE ? OR body LIKE ?
+        ORDER BY created_at DESC LIMIT ?
+    """, (q, q, limit)).fetchall()
+    conn.close()
+    return [
+        {"type": "note", "key": r[0], "content": r[1][:300], "tags": json.loads(r[2]) if r[2] else [],
+         "source": r[3], "created_at": r[4]}
+        for r in rows
+    ]
+
+
+def recall(query: str, top_k: int = 10) -> list[dict]:
+    """Multi-source search across facts, conversations, chat messages, and notes.
+    
+    Combines results from all sources, deduplicates by content,
+    and returns the most relevant entries ranked by source priority.
+    """
+    # FTS5 on conversations (best match)
+    conv_results = search_conversations(query, limit=5)
+    conv_formatted = [
+        {"type": "conversation", "key": c.get("title", ""), "content": c.get("summary", ""),
+         "created_at": c.get("created_at", "")}
+        for c in conv_results
+    ]
+    
+    # LIke search on facts, chat messages, notes
+    fact_results = _search_facts(query, top_k)
+    chat_results = _search_chat_messages(query, 5)
+    note_results = _search_notes(query, 5)
+    
+    # Merge all results, deduplicate by content
+    seen = set()
+    merged = []
+    for item in conv_formatted + fact_results + chat_results + note_results:
+        content_key = item.get("content", "")[:100].lower()
+        if content_key and content_key not in seen:
+            seen.add(content_key)
+            merged.append(item)
+    
+    return merged[:top_k]
 
 
 def forget(key: str):

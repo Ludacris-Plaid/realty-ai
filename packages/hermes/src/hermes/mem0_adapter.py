@@ -44,23 +44,45 @@ def _build_embedder_config():
     """Build embedder config from env vars.
     
     Provider options (MEM0_EMBEDDER_PROVIDER):
-      - openai (default): reads OPENAI_API_KEY + OPENAI_BASE_URL
-      - ollama: uses local Ollama instance (model: nomic-embed-text)
-      - huggingface: local sentence-transformers
+      - huggingface (default): uses local sentence-transformers (all-MiniLM-L6-v2).
+        Fast, free, no API key needed. ~80MB model download on first use.
+      - openai: reads OPENAI_API_KEY + OPENAI_BASE_URL
+      - ollama: uses local Ollama instance
     
-    Falls back to openai. If no API key set, runtime operations (add/search)
-    will fail gracefully — Mem0 returns empty results, system uses SQLite.
+    Falls back to huggingface if available, otherwise openai.
     """
     from mem0.embeddings.configs import EmbedderConfig
-    provider = os.environ.get("MEM0_EMBEDDER_PROVIDER", "openai").lower()
+    
+    # Probe: check which providers are actually available
+    _hf_available = None
+    def _huggingface_available():
+        nonlocal _hf_available
+        if _hf_available is None:
+            try:
+                import sentence_transformers  # noqa: F401
+                _hf_available = True
+            except ImportError:
+                _hf_available = False
+        return _hf_available
+    
+    provider = os.environ.get("MEM0_EMBEDDER_PROVIDER", "").lower()
+    
+    # Auto-detect: prefer huggingface if installed, fallback to openai
+    if not provider:
+        provider = "huggingface" if _huggingface_available() else "openai"
     
     config = {"model": os.environ.get("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")}
+    dims = 1536
+    
     if provider == "ollama":
+        config["model"] = os.environ.get("MEM0_EMBEDDER_MODEL", "nomic-embed-text")
         config["embedding_dims"] = int(os.environ.get("MEM0_EMBEDDER_DIMS", "768"))
+        dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "768"))
     elif provider == "huggingface":
         config["model"] = os.environ.get("MEM0_EMBEDDER_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+        dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "384"))  # all-MiniLM-L6-v2 → 384d
     
-    return EmbedderConfig(provider=provider, config=config)
+    return EmbedderConfig(provider=provider, config=config), dims
 
 
 def _build_llm_config():
@@ -99,13 +121,11 @@ def _create_mem0_instance():
         signal.alarm(12)  # 12-second timeout (generous for ollama model pull)
 
         try:
-            embedder = _build_embedder_config()
+            embedder, dims = _build_embedder_config()
             llm = _build_llm_config()
             
-            # Determine embedding dimensions
             embed_provider = embedder.provider
             embed_model = embedder.config.get("model", "unknown")
-            dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "768" if embed_provider == "ollama" else "1536"))
             
             config = MemoryConfig(
                 vector_store=VectorStoreConfig(

@@ -22,8 +22,9 @@ COPY packages/hermes /packages/hermes
 COPY packages/integrations /packages/integrations
 COPY packages/bots /packages/bots
 
-# ─── Step 4: Install mem0ai (optional, graceful fallback) ───────────────
+# ─── Step 4: Install optional ML packages (graceful fallback if they fail) ──
 RUN pip install --no-cache-dir mem0ai 2>/dev/null || echo "mem0ai skipped (optional)"
+RUN pip install --no-cache-dir sentence-transformers 2>/dev/null || echo "sentence-transformers skipped (optional)"
 
 # ─── Step 5: Add monorepo source dirs to Python path ────────────────────
 # Each package's import root is wherever __init__.py lives (src/ or root/)

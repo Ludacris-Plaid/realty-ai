@@ -134,15 +134,37 @@ def execute_tool(name: str, args: dict) -> str:
     elif name == "system_overview":
         return _system_overview()
     elif name == "remember_fact":
-        from .memory import remember
-        remember(args.get("key", ""), args.get("value", ""), args.get("category", "general"))
-        return f"Remembered: {args.get('key')} = {args.get('value')}"
+        from .memory import remember, recall
+        key = args.get("key", "")
+        value = args.get("value", "")
+        category = args.get("category", "general")
+        remember(key, value, category, source="explicit")
+        # Verify the write by reading it back
+        verify = recall(key, top_k=3)
+        if verify:
+            return f"✅ Stored: [{category}] {key} = {value}"
+        return f"⚠️ Tried to remember '{key}' but verification readback returned nothing. The store may need attention."
     elif name == "recall_memory":
         from .memory import recall
         results = recall(args.get("query", ""))
-        if results:
-            return "\n".join([f"  • {r['key']}: {r['value']} ({r['category']})" for r in results])
-        return "Nothing found in memory."
+        if not results:
+            return "Nothing found in memory."
+        lines = []
+        for r in results:
+            rtype = r.get("type", "memory")
+            key = r.get("key", "")
+            content = r.get("content", "")
+            if rtype == "fact":
+                lines.append(f"  📋 [{r.get('category','general')}] {key}: {content}")
+            elif rtype == "conversation":
+                lines.append(f"  💬 Conversation — {key}: {content[:200]}")
+            elif rtype == "chat":
+                lines.append(f"  🗣️ [{r.get('role','?')}] {content[:200]}")
+            elif rtype == "note":
+                lines.append(f"  📝 Note — {key}: {content[:200]}")
+            else:
+                lines.append(f"  • {key}: {content[:200]}")
+        return "\n".join(lines)
     elif name == "save_note":
         from .memory import save_note
         path = save_note(args.get("title", ""), args.get("body", ""),
