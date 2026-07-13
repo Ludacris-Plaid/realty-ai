@@ -37,6 +37,20 @@ FREE_PROVIDERS = [
         "note": "Primary free tier (Novita upstream). No key required.",
     },
     {
+        "name": "9router",
+        # The user's self-hosted 9router proxy, exposed via its Cloudflare
+        # tunnel. `combo_test` is 9router's own round-robin alias across all
+        # configured upstreams, so it self-heals when one upstream is out of
+        # credits. Local proxy (:20128) is keyless; the public tunnel requires
+        # the 9router remote-access key (NINEROUTER_API_KEY).
+        "base": os.environ.get("NINEROUTER_BASE_URL", "https://r9tgp4c.abc-tunnel.us/v1"),
+        "key_env": "NINEROUTER_API_KEY",
+        "model": os.environ.get("NINEROUTER_MODEL", "combo_test"),
+        "keyless": False,
+        "key_optional": True,   # include even with no key (local :20128 is keyless)
+        "note": "User's 9router multi-upstream proxy. Keyless on localhost:20128; keyed on the public tunnel.",
+    },
+    {
         "name": "nvidia",
         "base": "https://integrate.api.nvidia.com/v1",
         "key_env": "LLM_FALLBACK3_API_KEY",
@@ -130,7 +144,7 @@ def _resolve_key(p: dict) -> str:
 def _enabled_providers() -> list[dict]:
     out = []
     for p in get_free_providers():
-        if p.get("keyless"):
+        if p.get("keyless") or p.get("key_optional"):
             out.append(p)
         elif _resolve_key(p):
             out.append(p)
@@ -172,7 +186,7 @@ class ResilientLLM:
 
     def _build_one(self, p: dict) -> Optional[ChatOpenAI]:
         key = _resolve_key(p)
-        if not p.get("keyless") and not key:
+        if not p.get("keyless") and not p.get("key_optional") and not key:
             return None
         try:
             llm = ChatOpenAI(
