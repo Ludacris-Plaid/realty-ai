@@ -22,9 +22,10 @@ const agentColors: Record<string, string> = {
 };
 
 function ActivityItemCard({ item }: { item: ActivityItem }) {
-  const Icon = agentIcons[item.agent_type] || Bot;
-  const colorClass = agentColors[item.agent_type] || "bg-gray-100 text-gray-700";
-  const timeAgo = getTimeAgo(item.timestamp);
+  const agentType = item.agent_name?.toLowerCase().replace(/\s+/g, "_") || "general";
+  const Icon = agentIcons[agentType] || Bot;
+  const colorClass = agentColors[agentType] || "bg-gray-100 text-gray-700";
+  const timeAgo = getTimeAgo(item.created_at);
 
   return (
     <div className="flex gap-3">
@@ -35,10 +36,10 @@ function ActivityItemCard({ item }: { item: ActivityItem }) {
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium text-gray-900">{item.agent_name}</p>
           <Badge variant="secondary" className="text-[10px] uppercase tracking-wider px-1.5 py-0">
-            {item.agent_type}
+            {item.agent_name}
           </Badge>
         </div>
-        <p className="mt-0.5 text-sm text-gray-600">{item.description}</p>
+        <p className="mt-0.5 text-sm text-gray-600">{item.action}</p>
         <p className="mt-1 flex items-center gap-1 text-xs text-gray-400">
           <Clock className="h-3 w-3" />
           {timeAgo}

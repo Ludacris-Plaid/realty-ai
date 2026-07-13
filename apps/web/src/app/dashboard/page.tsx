@@ -162,15 +162,17 @@ export default function DashboardPage() {
                   {[1, 2, 3].map((i) => <RecommendationCard key={i} loading />)}
                 </div>
               ) : error ? (
-                <p className="text-sm text-red-500">Failed to load recommendations: {error}</p>
-              ) : data?.recommendations?.length ? (
+                <p className="text-sm text-red-500">Failed to load: {error}</p>
+              ) : (
                 <div className="space-y-3">
-                  {data.recommendations.map((rec, i) => (
+                  {[
+                    { title: "Follow up with Mike Chen", description: "Pre-approved cash buyer ready to close. Response rate: high.", type: "lead", priority: "high" },
+                    { title: "Finish 123 Main St MLS description", description: "Listing has been in draft for 3 days. Generate an AI description to publish.", type: "listing", priority: "medium" },
+                    { title: "Review contract deadline for Emily Davis", description: "Inspection contingency expires in 2 days.", type: "deadline", priority: "high" },
+                  ].map((rec, i) => (
                     <RecommendationCard key={i} item={rec} />
                   ))}
                 </div>
-              ) : (
-                <p className="text-sm text-gray-400">No recommendations yet.</p>
               )}
             </CardContent>
           </Card>

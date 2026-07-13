@@ -228,7 +228,7 @@ export async function getActivity(): Promise<ActivityItem[]> {
 }
 
 export async function sendChatMessage(req: AgentChatRequest): Promise<AgentChatResponse> {
-  const data = await fetchFromApi<{ reply: string }>("/api/v1/agent/chat", {
+  const data = await fetchFromApi<any>("/api/v1/agent/chat", {
     method: "POST",
     body: JSON.stringify(req),
   });
