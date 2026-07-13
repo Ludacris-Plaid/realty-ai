@@ -181,6 +181,32 @@ async def approve(approval_id: str, body: ApprovalAction):
     return {"status": "approved", "approval": result}
 
 
+# ─── Database Seed Endpoint ────────────────────────────────────────────────────
+
+@app.post("/api/v1/seed")
+async def seed_database():
+    """Seed the database with demo data for new users/organizations."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        
+        # Create vector extension
+        with engine.connect() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.commit()
+        
+        # Import and run seed
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "database"))
+        exec(open(os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "database", "seed.py")).read())
+        return {"status": "seeded", "database": db_url.split("@")[1].split("/")[0]}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
 @app.post("/approvals/{approval_id}/reject")
 async def reject(approval_id: str, body: ApprovalAction):
     """Reject a pending AI action."""
