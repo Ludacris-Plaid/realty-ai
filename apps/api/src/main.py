@@ -14,10 +14,12 @@ Endpoints:
   POST /approvals/{id}/reject  — Reject an action
 """
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import sys, os, json
+import sys, os, json, logging
+
+logger = logging.getLogger(__name__)
 
 # Load .env into environment BEFORE any AI imports (so models.py can read them)
 _env_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")
@@ -44,7 +46,11 @@ from approval import get_pending_approvals, approve as approve_action, reject as
 # ─── Athena Agent ──────────────────────────────────────────────────────────────
 from hermes.agent import get_athena
 from hermes.tools import TOOL_DEFINITIONS
-from hermes.memory import profile_summary, recall, save_note, search_notes, get_skills, search_conversations as search_memory_conversations, get_conversation_messages as get_mem_conversation_messages, list_conversations as list_mem_conversations
+from hermes.memory import profile_summary, recall, save_note, search_notes, get_skills, search_conversations as search_memory_conversations, get_conversation_messages as get_mem_conversation_messages, list_conversations as list_mem_conversations, get_bot_config, save_bot_config, delete_bot_config, list_bot_configs
+from hermes.mem0_adapter import search_memories as mem0_search_memories, get_all_memories as mem0_get_all_memories, delete_memory as mem0_delete_memory, get_user_memory_count as mem0_memory_count, is_available as mem0_available
+from hermes.tools import TOOL_DEFINITIONS
+
+# ─── Bot packages (lazy import for optional deps) ──────────────────────────
 
 from .config import settings
 from .api.router import api_router
@@ -426,3 +432,179 @@ async def new_conversation():
     agent = _get_athena()
     new_id = agent.new_conversation()
     return {"conversation_id": new_id, "message": "Fresh start. I'm ready for you."}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BOT WEBHOOK ENDPOINTS (Telegram, Slack)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _route_to_athena(text: str) -> dict:
+    """Route a message to the shared Athena agent."""
+    agent = _get_athena()
+    return agent.chat(text)
+
+
+@app.post("/api/v1/athena/telegram/webhook")
+async def telegram_webhook(request: Request):
+    """Telegram bot webhook — receives messages and routes to Athena."""
+    try:
+        from bots.telegram import handle_update
+        # Load runtime token from DB (fallback to env var)
+        bot_cfg = get_bot_config("telegram")
+        token = bot_cfg["config"].get("bot_token", "")
+        data = await request.json()
+        result = await handle_update(data, _route_to_athena, token=token)
+        return result
+    except ImportError as e:
+        logger.error(f"Telegram bot package not installed: {e}")
+        return {"ok": False, "error": f"Telegram bot not available: {e}"}
+    except Exception as e:
+        logger.error(f"Telegram webhook error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/v1/athena/slack/events")
+async def slack_events(request: Request):
+    """Slack Events API endpoint — receives events and routes to Athena."""
+    try:
+        from bots.slack import handle_event, verify_slack_signature
+        # Load runtime tokens from DB (fallback to env var)
+        bot_cfg = get_bot_config("slack")
+        slack_bot_token = bot_cfg["config"].get("bot_token", "")
+        slack_signing_secret = bot_cfg["config"].get("signing_secret", "")
+        
+        body = await request.body()
+        body_str = body.decode("utf-8")
+        
+        # Verify Slack signing secret
+        if not verify_slack_signature(dict(request.headers), body_str, signing_secret=slack_signing_secret):
+            return {"ok": False, "error": "Invalid signature"}
+        
+        data = json.loads(body_str)
+        result = await handle_event(data, _route_to_athena, bot_token=slack_bot_token)
+        return result
+    except ImportError as e:
+        logger.error(f"Slack bot package not installed: {e}")
+        return {"ok": False, "error": f"Slack bot not available: {e}"}
+    except Exception as e:
+        logger.error(f"Slack events error: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/v1/athena/telegram/set-webhook")
+async def telegram_set_webhook():
+    """Register the Telegram webhook URL (called once during setup)."""
+    try:
+        from bots.telegram import set_webhook
+        bot_cfg = get_bot_config("telegram")
+        token = bot_cfg["config"].get("bot_token", "")
+        
+        base_url = os.environ.get("PUBLIC_URL", "")
+        if not base_url:
+            base_url = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+            if base_url:
+                base_url = f"https://{base_url}"
+        if not base_url:
+            return {"ok": False, "error": "PUBLIC_URL not set"}
+        webhook_url = f"{base_url.rstrip('/')}/api/v1/athena/telegram/webhook"
+        result = await set_webhook(webhook_url, token=token)
+        return result
+    except ImportError as e:
+        return {"ok": False, "error": f"Telegram bot not available: {e}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/v1/athena/bots/status")
+async def bot_status():
+    """Check which bot integrations are configured (env vars + DB)."""
+    from bots.telegram import is_configured as tg_configured
+    from bots.slack import is_configured as slack_configured
+    
+    db_configs = list_bot_configs()
+    
+    # Check both env vars and DB configs
+    tg_env = bool(os.environ.get("TELEGRAM_BOT_TOKEN", ""))
+    tg_db = db_configs.get("telegram", {}).get("enabled", False)
+    slack_env = bool(os.environ.get("SLACK_BOT_TOKEN", "")) and bool(os.environ.get("SLACK_SIGNING_SECRET", ""))
+    slack_db = db_configs.get("slack", {}).get("enabled", False)
+    
+    return {
+        "telegram": {
+            "configured": tg_env or tg_db,
+            "env_token_set": tg_env,
+            "db_configured": tg_db,
+            "db_config": db_configs.get("telegram", {}),
+        },
+        "slack": {
+            "configured": slack_env or slack_db,
+            "env_bot_token_set": bool(os.environ.get("SLACK_BOT_TOKEN", "")),
+            "env_signing_secret_set": bool(os.environ.get("SLACK_SIGNING_SECRET", "")),
+            "db_configured": slack_db,
+            "db_config": db_configs.get("slack", {}),
+        },
+    }
+
+
+# ─── Bot Configuration Endpoints (user-managed tokens) ─────────────────────
+
+
+class BotConfigRequest(BaseModel):
+    platform: str
+    config: dict = {}
+    enabled: bool = False
+
+
+@app.post("/api/v1/athena/bots/config")
+async def set_bot_config(req: BotConfigRequest):
+    """Save bot configuration tokens (Telegram, Slack, etc.)."""
+    save_bot_config(req.platform, req.config, req.enabled)
+    return {"ok": True, "platform": req.platform, "enabled": req.enabled}
+
+
+@app.delete("/api/v1/athena/bots/config/{platform}")
+async def remove_bot_config(platform: str):
+    """Delete bot configuration for a platform."""
+    delete_bot_config(platform)
+    return {"ok": True, "platform": platform}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MEM0 MEMORY MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+@app.get("/api/v1/athena/memories")
+async def list_memories(limit: int = 50):
+    """List all Mem0 memories. Used for the memory dashboard."""
+    if not mem0_available():
+        return {"memories": [], "count": 0, "enabled": False}
+    memories = mem0_get_all_memories(limit=limit)
+    return {"memories": memories, "count": len(memories), "enabled": True}
+
+
+@app.get("/api/v1/athena/memories/search")
+async def search_memories(query: str = "", limit: int = 10):
+    """Semantic search across memories."""
+    if not query or not mem0_available():
+        return {"memories": [], "count": 0}
+    results = mem0_search_memories(query, limit=limit)
+    return {"memories": results, "count": len(results)}
+
+
+@app.delete("/api/v1/athena/memories/{memory_id}")
+async def delete_memory(memory_id: str):
+    """Delete a specific memory by ID."""
+    if not mem0_available():
+        return {"ok": False, "error": "Mem0 not available"}
+    ok = mem0_delete_memory(memory_id)
+    return {"ok": ok, "memory_id": memory_id}
+
+
+@app.get("/api/v1/athena/memories/count")
+async def memory_count():
+    """Get the count of stored memories."""
+    if not mem0_available():
+        return {"count": 0, "enabled": False}
+    return {"count": mem0_memory_count(), "enabled": True}

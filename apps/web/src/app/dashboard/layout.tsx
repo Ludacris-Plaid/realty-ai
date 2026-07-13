@@ -13,6 +13,7 @@ function getPageContext(pathname: string): string | undefined {
   if (pathname.includes("/marketing")) return "marketing";
   if (pathname.includes("/analytics")) return "analytics";
   if (pathname.includes("/ai-agents")) return "agents";
+  if (pathname.includes("/memory")) return "memory";
   if (pathname.includes("/settings")) return "settings";
   return undefined;
 }

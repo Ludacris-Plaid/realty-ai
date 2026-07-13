@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   LayoutDashboard, Users, Building2, FileText, Calendar,
   Megaphone, Bot, BarChart3, Settings, ChevronLeft, Book, Brain,
-  Sparkles,
+  Sparkles, Database,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -24,6 +24,7 @@ const navItems = [
   { label: "Marketing", href: "/dashboard/marketing", icon: Megaphone },
   // AI & tools
   { label: "AI Agents", href: "/dashboard/ai-agents", icon: Bot },
+  { label: "Memory", href: "/dashboard/memory", icon: Database },
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
   { label: "Docs", href: "/docs", icon: Book },

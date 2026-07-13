@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "sqlalchemy>=2.0.0",
     "psutil>=5.0.0",
+    "mem0ai>=2.0.0",
 ]
 
 [tool.setuptools.packages.find]

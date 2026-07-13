@@ -98,6 +98,15 @@ def _ensure_schema(conn: sqlite3.Connection):
             source TEXT DEFAULT 'agent',
             created_at TEXT DEFAULT (datetime('now'))
         );
+        
+        CREATE TABLE IF NOT EXISTS bot_configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            platform TEXT NOT NULL UNIQUE,
+            config_json TEXT NOT NULL DEFAULT '{}',
+            enabled INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
     """)
     conn.commit()
 
@@ -404,3 +413,59 @@ def reset_conversation() -> str:
     conn.commit()
     conn.close()
     return conv_id
+
+
+# ─── Bot Configurations (Telegram, Slack) ──────────────────────────────────
+
+def get_bot_config(platform: str) -> dict:
+    """Get bot configuration for a platform. Returns empty dict if not set."""
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT config_json, enabled FROM bot_configs WHERE platform = ?",
+        (platform,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return {"enabled": False, "config": {}}
+    return {"enabled": bool(row[1]), "config": json.loads(row[0])}
+
+
+def save_bot_config(platform: str, config: dict, enabled: bool = False):
+    """Save bot configuration for a platform. Upserts if exists."""
+    conn = _get_db()
+    conn.execute("""
+        INSERT INTO bot_configs (platform, config_json, enabled, updated_at)
+        VALUES (?, ?, ?, datetime('now'))
+        ON CONFLICT(platform) DO UPDATE SET
+            config_json = excluded.config_json,
+            enabled = excluded.enabled,
+            updated_at = excluded.updated_at
+    """, (platform, json.dumps(config), 1 if enabled else 0))
+    conn.commit()
+    conn.close()
+
+
+def delete_bot_config(platform: str):
+    """Remove bot configuration for a platform."""
+    conn = _get_db()
+    conn.execute("DELETE FROM bot_configs WHERE platform = ?", (platform,))
+    conn.commit()
+    conn.close()
+
+
+def list_bot_configs() -> dict:
+    """Get all bot configurations."""
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT platform, config_json, enabled, updated_at FROM bot_configs"
+    ).fetchall()
+    conn.close()
+    result = {}
+    for r in rows:
+        result[r[0]] = {
+            "platform": r[0],
+            "config": json.loads(r[1]),
+            "enabled": bool(r[2]),
+            "updated_at": r[3],
+        }
+    return result

@@ -8,10 +8,12 @@ COPY packages/database /packages/database
 COPY packages/ai /packages/ai
 COPY packages/integrations /packages/integrations
 COPY packages/hermes /packages/hermes
+COPY packages/bots /packages/bots
 RUN pip install --no-cache-dir -e /packages/database && \
     pip install --no-cache-dir -e /packages/ai && \
     pip install --no-cache-dir -e /packages/integrations && \
-    pip install --no-cache-dir -e /packages/hermes
+    pip install --no-cache-dir -e /packages/hermes && \
+    pip install --no-cache-dir -e /packages/bots
 
 # Install API package
 COPY apps/api/pyproject.toml /app/apps/api/

@@ -1,15 +1,142 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Bot, Bell, Shield, CreditCard, Globe, Palette, Webhook, Key, Save, User, Building2 } from "lucide-react";
+import { Bot, Bell, Shield, CreditCard, Globe, Palette, Webhook, Key, Save, User, Building2, Eye, EyeOff, CheckCircle, XCircle, RefreshCw, Loader2 } from "lucide-react";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
+interface BotStatus {
+  telegram: { configured: boolean; env_token_set: boolean; db_configured: boolean; db_config: Record<string, any> };
+  slack: { configured: boolean; env_bot_token_set: boolean; env_signing_secret_set: boolean; db_configured: boolean; db_config: Record<string, any> };
+}
+
+interface BotConfig {
+  platform: string;
+  config: Record<string, string>;
+  enabled: boolean;
+}
 
 export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
+
+  // ─── Bot integration state ─────────────────────────────────────────────────
+  const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [statusError, setStatusError] = useState("");
+
+  // Telegram form
+  const [tgToken, setTgToken] = useState("");
+  const [tgEnabled, setTgEnabled] = useState(false);
+  const [tgShowToken, setTgShowToken] = useState(false);
+  const [tgSaving, setTgSaving] = useState(false);
+  const [tgMsg, setTgMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Slack form
+  const [slackToken, setSlackToken] = useState("");
+  const [slackSecret, setSlackSecret] = useState("");
+  const [slackEnabled, setSlackEnabled] = useState(false);
+  const [slackShowToken, setSlackShowToken] = useState(false);
+  const [slackSaving, setSlackSaving] = useState(false);
+  const [slackMsg, setSlackMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Load initial status
+  const fetchStatus = async () => {
+    setStatusLoading(true);
+    setStatusError("");
+    try {
+      const res = await fetch(`${API_BASE}/athena/bots/status`);
+      if (!res.ok) throw new Error(`Status fetch failed: ${res.status}`);
+      const data: BotStatus = await res.json();
+      setBotStatus(data);
+
+      // Populate form fields from DB (or env)
+      const tgCfg = data.telegram.db_config?.config || {};
+      setTgToken(tgCfg.bot_token || "");
+      setTgEnabled(data.telegram.db_configured || data.telegram.env_token_set);
+
+      const slackCfg = data.slack.db_config?.config || {};
+      setSlackToken(slackCfg.bot_token || "");
+      setSlackSecret(slackCfg.signing_secret || "");
+      setSlackEnabled(data.slack.db_configured || (data.slack.env_bot_token_set && data.slack.env_signing_secret_set));
+    } catch (e: any) {
+      setStatusError(e.message);
+    } finally {
+      setStatusLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchStatus(); }, []);
+
+  // ─── Save bot config ──────────────────────────────────────────────────────
+  const saveBotConfig = async (platform: string, config: Record<string, string>, enabled: boolean) => {
+    const setMsg = platform === "telegram"
+      ? (m: typeof tgMsg) => setTgMsg(m)
+      : (m: typeof slackMsg) => setSlackMsg(m);
+    const setSaving = platform === "telegram" ? setTgSaving : setSlackSaving;
+
+    setSaving(true);
+    setMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/athena/bots/config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ platform, config, enabled }),
+      });
+      if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+      setMsg({ ok: true, text: "Saved successfully." });
+      await fetchStatus(); // Refresh status
+    } catch (e: any) {
+      setMsg({ ok: false, text: e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ─── Delete bot config ────────────────────────────────────────────────────
+  const deleteBotConfig = async (platform: string) => {
+    const setMsg = platform === "telegram" ? setTgMsg : setSlackMsg;
+
+    if (!confirm(`Remove ${platform} configuration?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/athena/bots/config/${platform}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+      // Reset form
+      if (platform === "telegram") {
+        setTgToken("");
+        setTgEnabled(false);
+        setTgMsg({ ok: true, text: "Configuration removed." });
+      } else {
+        setSlackToken("");
+        setSlackSecret("");
+        setSlackEnabled(false);
+        setSlackMsg({ ok: true, text: "Configuration removed." });
+      }
+      await fetchStatus();
+    } catch (e: any) {
+      setMsg({ ok: false, text: e.message });
+    }
+  };
+
+  // ─── Set Telegram webhook ─────────────────────────────────────────────────
+  const setTelegramWebhook = async () => {
+    setTgMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/athena/telegram/set-webhook`, { method: "POST" });
+      const data = await res.json();
+      if (data.ok) {
+        setTgMsg({ ok: true, text: "Webhook registered!" });
+      } else {
+        setTgMsg({ ok: false, text: data.error || "Webhook registration failed" });
+      }
+    } catch (e: any) {
+      setTgMsg({ ok: false, text: e.message });
+    }
+  };
 
   const handleSave = () => {
     setSaved(true);
@@ -25,6 +152,7 @@ export default function SettingsPage() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
+          {/* ── Profile ── */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -57,6 +185,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
+          {/* ── Brokerage ── */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -77,6 +206,7 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
+          {/* ── AI Preferences ── */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -115,8 +245,196 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* ── Bot Integrations (Telegram / Slack) ── */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Webhook className="h-5 w-5 text-brand-500" /> Bot Integrations
+              </CardTitle>
+              <CardDescription>
+                Connect your own Telegram and Slack bots to Athena. Tokens are stored encrypted in your database.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-8">
+
+              {/* Telegram */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Bot className="h-5 w-5 text-blue-500" />
+                    <h3 className="text-base font-semibold text-gray-900">Telegram</h3>
+                    {statusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                    ) : (
+                      <Badge variant={botStatus?.telegram.configured ? "success" : "default"} className="text-[10px] px-1.5 py-0">
+                        {botStatus?.telegram.configured ? "Connected" : "Not configured"}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="relative">
+                    <Input
+                      label="Bot Token"
+                      placeholder="1234567890:ABCdefGHIjklmNOPqrstUVwxyz"
+                      value={tgToken}
+                      onChange={(e) => setTgToken(e.target.value)}
+                      type={tgShowToken ? "text" : "password"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setTgShowToken(!tgShowToken)}
+                      className="absolute right-2 bottom-2.5 text-gray-400 hover:text-gray-600"
+                    >
+                      {tgShowToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`h-5 w-9 rounded-full cursor-pointer relative transition-colors ${tgEnabled ? "bg-blue-600" : "bg-gray-300"}`}
+                      onClick={() => setTgEnabled(!tgEnabled)}
+                    >
+                      <div className={`h-4 w-4 rounded-full bg-white absolute top-0.5 shadow transition-transform ${tgEnabled ? "right-0.5" : "left-0.5"}`} />
+                    </div>
+                    <span className="text-xs text-gray-500">Enable Telegram bot</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => saveBotConfig("telegram", { bot_token: tgToken }, tgEnabled)}
+                      disabled={tgSaving || !tgToken}
+                    >
+                      {tgSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      Save Token
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={setTelegramWebhook}
+                      disabled={!tgEnabled}
+                    >
+                      <Webhook className="h-4 w-4" /> Set Webhook
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-red-500 border-red-200 hover:bg-red-50"
+                      onClick={() => deleteBotConfig("telegram")}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                  {tgMsg && (
+                    <p className={`text-xs flex items-center gap-1 ${tgMsg.ok ? "text-green-600" : "text-red-600"}`}>
+                      {tgMsg.ok ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                      {tgMsg.text}
+                    </p>
+                  )}
+                  <details className="text-xs text-gray-400">
+                    <summary className="cursor-pointer hover:text-gray-600">How to get a Telegram Bot Token</summary>
+                    <ol className="mt-2 ml-4 list-decimal space-y-1 text-gray-500">
+                      <li>Open Telegram and search for <strong>@BotFather</strong></li>
+                      <li>Send <code className="bg-gray-100 px-1 rounded">/newbot</code> and follow the prompts</li>
+                      <li>BotFather will give you an API token — paste it above</li>
+                      <li>Click <strong>Save Token</strong>, then <strong>Set Webhook</strong></li>
+                    </ol>
+                  </details>
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* Slack */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Bot className="h-5 w-5 text-purple-500" />
+                    <h3 className="text-base font-semibold text-gray-900">Slack</h3>
+                    {statusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                    ) : (
+                      <Badge variant={botStatus?.slack.configured ? "success" : "default"} className="text-[10px] px-1.5 py-0">
+                        {botStatus?.slack.configured ? "Connected" : "Not configured"}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+                <div className="space-y-3">
+                  <div className="relative">
+                    <Input
+                      label="Bot Token"
+                      placeholder="xoxb-1234567890-abc123def456"
+                      value={slackToken}
+                      onChange={(e) => setSlackToken(e.target.value)}
+                      type={slackShowToken ? "text" : "password"}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setSlackShowToken(!slackShowToken)}
+                      className="absolute right-2 bottom-2.5 text-gray-400 hover:text-gray-600"
+                    >
+                      {slackShowToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <Input
+                    label="Signing Secret"
+                    placeholder="abc123def456..."
+                    value={slackSecret}
+                    onChange={(e) => setSlackSecret(e.target.value)}
+                    type="password"
+                  />
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`h-5 w-9 rounded-full cursor-pointer relative transition-colors ${slackEnabled ? "bg-purple-600" : "bg-gray-300"}`}
+                      onClick={() => setSlackEnabled(!slackEnabled)}
+                    >
+                      <div className={`h-4 w-4 rounded-full bg-white absolute top-0.5 shadow transition-transform ${slackEnabled ? "right-0.5" : "left-0.5"}`} />
+                    </div>
+                    <span className="text-xs text-gray-500">Enable Slack bot</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => saveBotConfig("slack", { bot_token: slackToken, signing_secret: slackSecret }, slackEnabled)}
+                      disabled={slackSaving || !slackToken || !slackSecret}
+                    >
+                      {slackSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      Save Credentials
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-red-500 border-red-200 hover:bg-red-50"
+                      onClick={() => deleteBotConfig("slack")}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                  {slackMsg && (
+                    <p className={`text-xs flex items-center gap-1 ${slackMsg.ok ? "text-green-600" : "text-red-600"}`}>
+                      {slackMsg.ok ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                      {slackMsg.text}
+                    </p>
+                  )}
+                  <details className="text-xs text-gray-400">
+                    <summary className="cursor-pointer hover:text-gray-600">How to set up a Slack bot</summary>
+                    <ol className="mt-2 ml-4 list-decimal space-y-1 text-gray-500">
+                      <li>Go to <strong>api.slack.com/apps</strong> and create a new app</li>
+                      <li>Under <strong>OAuth &amp; Permissions</strong>, add scopes: <code className="bg-gray-100 px-1 rounded">chat:write</code>, <code className="bg-gray-100 px-1 rounded">channels:history</code>, <code className="bg-gray-100 px-1 rounded">app_mentions:read</code></li>
+                      <li>Install the app to your workspace and copy the <strong>Bot Token</strong> (xoxb-...)</li>
+                      <li>Under <strong>Basic Information</strong>, copy the <strong>Signing Secret</strong></li>
+                      <li>Enable <strong>Event Subscriptions</strong> with URL: <code className="bg-gray-100 px-1 rounded">{process.env.NEXT_PUBLIC_API_URL || "..."}/athena/slack/events</code></li>
+                      <li>Subscribe to <code className="bg-gray-100 px-1 rounded">message.channels</code> and <code className="bg-gray-100 px-1 rounded">app_mention</code></li>
+                    </ol>
+                  </details>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
+        {/* ── Right sidebar ── */}
         <div className="space-y-6">
           <Card>
             <CardHeader>
@@ -156,6 +474,23 @@ export default function SettingsPage() {
                   </Badge>
                 </div>
               ))}
+              <Separator />
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700 flex items-center gap-1">
+                  <Bot className="h-3.5 w-3.5 text-blue-500" /> Telegram Bot
+                </span>
+                <Badge variant={botStatus?.telegram.configured ? "success" : "default"}>
+                  {botStatus?.telegram.configured ? "Connected" : "Connect"}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-700 flex items-center gap-1">
+                  <Bot className="h-3.5 w-3.5 text-purple-500" /> Slack Bot
+                </span>
+                <Badge variant={botStatus?.slack.configured ? "success" : "default"}>
+                  {botStatus?.slack.configured ? "Connected" : "Connect"}
+                </Badge>
+              </div>
             </CardContent>
           </Card>
         </div>

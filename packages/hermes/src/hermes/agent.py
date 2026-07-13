@@ -19,7 +19,16 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
-from .memory import profile_summary, remember, recall, save_conversation, search_conversations, consolidate as consolidate_memory, get_or_create_active_conversation, save_message, get_conversation_messages, reset_conversation as reset_conversation_db, list_conversations
+from .memory import profile_summary as sqlite_profile_summary, remember, recall, save_conversation, search_conversations, consolidate as consolidate_memory, get_or_create_active_conversation, save_message, get_conversation_messages, reset_conversation as reset_conversation_db, list_conversations
+from .mem0_adapter import (
+    is_available as mem0_available,
+    add_interaction as mem0_add_interaction,
+    search_memories as mem0_search,
+    get_all_memories as mem0_get_all,
+    get_relevant_context as mem0_get_context,
+    get_user_memory_count as mem0_memory_count,
+    migrate_from_sqlite,
+)
 from .tools import TOOL_DEFINITIONS, execute_tool, set_engine
 
 logger = logging.getLogger(__name__)
@@ -185,7 +194,7 @@ class AthenaAgent:
     
     def chat(self, message: str) -> dict:
         """Send a message to Athena and get a response. Persists conversation history."""
-        profile = profile_summary()
+        profile = sqlite_profile_summary()
         tool_names = [t.__name__ for t in self.tools]
         tool_calls_used = []
         
@@ -207,8 +216,25 @@ class AthenaAgent:
             history_text = "\n".join(history_pairs)
             messages.append(SystemMessage(content=f"Recent conversation history:\n{history_text}"))
         
+        # ─── Memory injection — dual layer ────────────────────────────────
+        # Layer 1: Legacy SQLite profile (backward compat)
         if profile and profile != "I'm still getting to know you.":
             messages.append(SystemMessage(content=f"User Profile:\n{profile[:500]}"))
+        
+        # Layer 2: Mem0 semantically relevant memories for this message
+        mem0_context = mem0_get_context(limit=6)
+        if mem0_context:
+            messages.append(SystemMessage(content=f"Relevant memories:\n{mem0_context[:600]}"))
+        
+        # Layer 3: Semantic search of memories matching current message
+        if message and len(message) > 10:
+            relevant = mem0_search(message, limit=3)
+            if relevant:
+                mem_lines = [f"  • {m['text'][:200]}" for m in relevant if m.get('text')]
+                if mem_lines:
+                    messages.append(SystemMessage(
+                        content=f"Memories relevant to current query:\n" + "\n".join(mem_lines[:3])
+                    ))
         
         # Save user message
         save_message(self.conversation_id, "user", message)
@@ -274,10 +300,14 @@ class AthenaAgent:
             }
     
     def _post_chat_learning(self, user_message: str, response: str, tools: list):
-        """After each chat, learn from the interaction and persist knowledge."""
+        """After each chat, learn from the interaction and persist knowledge.
+        
+        Uses Mem0 for automatic entity extraction — no manual pattern-matching needed.
+        Falls back to legacy SQLite remember() if Mem0 is unavailable.
+        """
         self.conversation_count += 1
         
-        # Save conversation
+        # Save conversation summary (for conversation search UI)
         conv_id = str(uuid.uuid4())
         save_conversation(
             conv_id=conv_id,
@@ -288,22 +318,31 @@ class AthenaAgent:
             outcome="completed",
         )
         
-        # Extract and remember user info from message
-        # Look for explicit self-disclosures
-        disclosure_patterns = [
-            ("name", "my name is", "preference"),
-            ("preferred_contact", "email", "preference"),
-            ("preferred_contact", "phone", "preference"),
-            ("location", "i'm in", "personal"),
-            ("location", "i live", "personal"),
-        ]
-        msg_lower = user_message.lower()
-        for key, pattern, category in disclosure_patterns:
-            if pattern in msg_lower:
-                # Extract the value after the pattern
-                idx = msg_lower.find(pattern) + len(pattern)
-                value = user_message[idx:idx+80].strip().split(".")[0].split(",")[0]
-                remember(key, value, category, source="explicit")
+        # ─── Mem0: Automatic entity extraction ───────────────────────────
+        # Feed the full interaction — Mem0 extracts entities, facts, preferences
+        # and relationships automatically via its LLM-powered analysis.
+        mem0_add_interaction(
+            user_message=user_message,
+            assistant_response=response,
+            metadata={"conversation_id": self.conversation_id, "tools": tools},
+        )
+        
+        # ─── Legacy fallback (manual pattern matching) ────────────────────
+        # Only used when Mem0 is not available.
+        if not mem0_available():
+            disclosure_patterns = [
+                ("name", "my name is", "preference"),
+                ("preferred_contact", "email", "preference"),
+                ("preferred_contact", "phone", "preference"),
+                ("location", "i'm in", "personal"),
+                ("location", "i live", "personal"),
+            ]
+            msg_lower = user_message.lower()
+            for key, pattern, category in disclosure_patterns:
+                if pattern in msg_lower:
+                    idx = msg_lower.find(pattern) + len(pattern)
+                    value = user_message[idx:idx+80].strip().split(".")[0].split(",")[0]
+                    remember(key, value, category, source="explicit")
         
         # Periodic consolidation (every 10 conversations)
         if self.conversation_count % 10 == 0:
@@ -311,11 +350,12 @@ class AthenaAgent:
     
     def get_state(self) -> dict:
         """Get Athena internal state for the dashboard overview."""
-        from .memory import get_skills, profile_summary, get_conversation_messages
+        from .memory import get_skills, profile_summary as sqlite_profile, get_conversation_messages
         
         skills = get_skills()
-        profile_info = profile_summary()
+        profile_info = sqlite_profile()
         recent_messages = get_conversation_messages(self.conversation_id, limit=10)
+        mem_count = mem0_memory_count()
         
         return {
             "agent_id": self.agent_id,
@@ -326,6 +366,8 @@ class AthenaAgent:
             "skills_count": len(skills),
             "skills": skills,
             "profile": profile_info,
+            "mem0_memories": mem_count,
+            "mem0_enabled": mem0_available(),
             "user_name": self.user_name,
             "status": "active",
             "tools_available": len(TOOL_DEFINITIONS),
@@ -345,13 +387,24 @@ class AthenaAgent:
 # ─── Singleton ──────────────────────────────────────────────────────────────
 
 _instance: Optional[AthenaAgent] = None
+_migration_done = False
 
 def get_athena(db_engine=None) -> AthenaAgent:
     """Get or create the singleton Athena agent instance."""
-    global _instance
+    global _instance, _migration_done
     if _instance is None:
         model = os.environ.get("ATHENA_MODEL", "hy3-free")
         _instance = AthenaAgent(db_engine=db_engine, model_name=model)
+        # One-time migration of existing SQLite facts into Mem0
+        if not _migration_done and mem0_available():
+            try:
+                from . import memory as memory_module
+                result = migrate_from_sqlite(memory_module)
+                if result.get("count", 0) > 0:
+                    logger.info(f"Migrated {result['count']} existing memories to Mem0")
+            except Exception as e:
+                logger.warning(f"Mem0 migration skipped: {e}")
+            _migration_done = True
     return _instance
 
 
