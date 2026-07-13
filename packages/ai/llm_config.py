@@ -1,11 +1,13 @@
 """
-RealtyAI — Model Gateway with 4-Tier Cascading Fallback.
+RealtyAI — Model Gateway with 5-Tier Cascading Fallback.
 
 Tier 0 (primary):  OpenCode Zen (free tier, via opencode.ai)
 Tier 1:             9router tunnel proxy (ocg/ models via cloudflared)
 Tier 2:             Featherless.ai (paid, fast)
-Tier 3:             NVIDIA API (last resort)
+Tier 3:             NVIDIA API (free last-resort)
+Tier 4:             Groq (free tier, fast) — only used if GROQ_API_KEY set
 
+Free providers in the chain: OpenCode Zen (0), NVIDIA (3), Groq (4).
 Each level falls through ONLY on total failure (timeout, auth, down).
 Rate limits and concurrency caps do NOT trigger fallback — they retry.
 """
@@ -46,6 +48,11 @@ TIERS = [
         "base": lambda: _env("LLM_FALLBACK3_API_BASE", "https://integrate.api.nvidia.com/v1"),
         "key":  lambda: _env("LLM_FALLBACK3_API_KEY", ""),
         "model": lambda: _env("LLM_FALLBACK3_MODEL", "meta/llama-3.1-8b-instruct"),
+    },
+    {  # 4: Groq (free tier) — only used if GROQ_API_KEY is set
+        "base": lambda: _env("LLM_FALLBACK4_API_BASE", "https://api.groq.com/openai/v1"),
+        "key":  lambda: _env("GROQ_API_KEY", ""),
+        "model": lambda: _env("LLM_FALLBACK4_MODEL", "llama-3.3-70b-versatile"),
     },
 ]
 
