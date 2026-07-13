@@ -17,7 +17,7 @@ for the caller to use with get_model().
 """
 from typing import Optional
 
-from models import get_model, get_local_model, get_premium_model, get_fast_model
+from llm_config import get_model, get_local_model, get_premium_model, get_fast_model
 
 
 # ─── Privacy Keywords ────────────────────────────────────────────────────────

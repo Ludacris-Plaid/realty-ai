@@ -205,18 +205,10 @@ async def seed_database():
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             conn.commit()
         
-        # Import database models — ensure /packages/database/src is first in path
-        # to avoid shadowing by /packages/ai/models.py
-        _db_pkg = "/packages/database/src"
-        if os.path.isdir(_db_pkg):
-            sys.path = [p for p in sys.path if p]
-            sys.path.insert(0, _db_pkg)
-        # Remove /packages/ai temporarily to avoid models.py name collision
-        sys.path = [p for p in sys.path if p != "/packages/ai"]
+        # Import database ORM models
+        # PYTHONPATH has /packages/database/src as first entry for this
         from base import Base
         from models import User, Lead, Property, AgentProfile, Client, Document, Conversation, Message, AIMemory, Workflow, WorkflowStep
-        # Restore /packages/ai for the rest of the app
-        sys.path.insert(0, "/packages/ai")
         Base.metadata.create_all(engine)
         
         # Create activities and approvals tables (raw SQL — not yet in ORM models)
