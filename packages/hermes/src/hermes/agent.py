@@ -230,7 +230,7 @@ class AthenaAgent:
     def chat(self, message: str) -> dict:
         """Send a message to Athena and get a response. Persists conversation history."""
         profile = sqlite_profile_summary()
-        tool_names = [t.__name__ for t in self.tools]
+        tool_names = [t.name for t in self.tools]
         tool_calls_used = []
         
         messages = [
