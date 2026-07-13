@@ -1,0 +1,14 @@
+[Unit]
+Description=RealtyAI Cloudflare Tunnel
+Requires=docker.service realty-api.service
+After=docker.service realty-api.service network-online.target
+
+[Service]
+Type=exec
+User=dysthemix
+ExecStart=/usr/local/bin/cloudflared tunnel --url http://localhost:8000 --no-autoupdate
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
