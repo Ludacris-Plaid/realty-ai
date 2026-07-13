@@ -12,38 +12,8 @@ COPY packages/bots/pyproject.toml /packages/bots/pyproject.toml
 COPY apps/api/pyproject.toml /app/apps/api/pyproject.toml
 
 # ─── Step 2: Extract & install all dependencies ─────────────────────────
-RUN echo "Collecting dependencies..." && python3 -c "
-import tomllib, os
-
-deps = set()
-for path, extra in [
-    ('/packages/ai/pyproject.toml', []),
-    ('/packages/database/pyproject.toml', []),
-    ('/packages/hermes/pyproject.toml', []),
-    ('/packages/integrations/pyproject.toml', []),
-    ('/packages/bots/pyproject.toml', []),
-    ('/app/apps/api/pyproject.toml', ['dev']),
-]:
-    if not os.path.exists(path):
-        continue
-    with open(path) as f:
-        data = tomllib.load(f)
-    for dep in data.get('project', {}).get('dependencies', []):
-        clean = dep.strip().strip('\"').strip(\"'\")
-        if clean:
-            deps.add(clean)
-    # Also add optional dev deps
-    for opt in extra:
-        for dep in data.get('project', {}).get('optional-dependencies', {}).get(opt, []):
-            clean = dep.strip().strip('\"').strip(\"'\")
-            if clean:
-                deps.add(clean)
-
-with open('/tmp/requirements.txt', 'w') as f:
-    f.write('\n'.join(sorted(deps)))
-
-print(f'{len(deps)} dependencies extracted')
-" && pip install --no-cache-dir -r /tmp/requirements.txt
+COPY apps/api/extract_deps.py /tmp/extract_deps.py
+RUN python3 /tmp/extract_deps.py && pip install --no-cache-dir -r /tmp/requirements.txt
 
 # ─── Step 3: Copy package source code ───────────────────────────────────
 COPY packages/ai /packages/ai
