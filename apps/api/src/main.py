@@ -211,8 +211,22 @@ async def seed_database():
         from models import User, Lead, Property, AgentProfile, Client, Document, Conversation, Message, AIMemory, Workflow, WorkflowStep
         Base.metadata.create_all(engine)
         
-        # Create activities and approvals tables (raw SQL — not yet in ORM models)
+        # Create operational tables (raw SQL — not yet in ORM models)
         with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS campaigns (
+                    id UUID PRIMARY KEY, name TEXT NOT NULL,
+                    audience TEXT DEFAULT '', status TEXT DEFAULT 'active',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS showings (
+                    id UUID PRIMARY KEY, lead_name TEXT NOT NULL,
+                    property_address TEXT, showing_time TEXT, status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS activities (
                     id UUID PRIMARY KEY,

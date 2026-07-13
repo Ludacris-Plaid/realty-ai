@@ -10,14 +10,18 @@ import uuid
 
 from langchain_core.tools import tool
 
+import logging
+logger = logging.getLogger(__name__)
+
 try:
     from db import (
         get_hot_leads_from_db, search_leads_in_db, get_lead_count_from_db,
         get_active_listings_from_db, search_properties_in_db,
     )
     DB_AVAILABLE = True
-except Exception:
+except Exception as e:
     DB_AVAILABLE = False
+    logger.warning(f"DB module unavailable, using mock data: {e}")
 
 
 # ─── Mock Data (fallback when DB is unavailable) ────────────────────────────
@@ -104,8 +108,8 @@ def get_hot_leads() -> list[dict]:
                  "id": l["id"]}
                 for l in db_leads
             ]
-    except Exception:
-        pass  # fallback to mock
+    except Exception as e:
+        logger.warning(f"get_hot_leads_from_db failed, falling back to mock: {e}")
 
     sorted_leads = sorted(_MOCK_LEADS, key=lambda l: l["ai_score"], reverse=True)
     return [
@@ -130,8 +134,8 @@ def search_leads(name: Optional[str] = None, status: Optional[str] = None) -> li
     try:
         if DB_AVAILABLE:
             return search_leads_in_db(name=name, status=status)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"search_leads_in_db failed, falling back to mock: {e}")
 
     results = _MOCK_LEADS
     if name:
@@ -150,8 +154,8 @@ def get_lead_count() -> dict:
     try:
         if DB_AVAILABLE:
             return get_lead_count_from_db()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"get_lead_count_from_db failed, falling back to mock: {e}")
 
     counts = {}
     for l in _MOCK_LEADS:
@@ -168,8 +172,8 @@ def get_active_listings() -> list[dict]:
     try:
         if DB_AVAILABLE:
             return get_active_listings_from_db()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"get_active_listings_from_db failed, falling back to mock: {e}")
 
     return [p for p in _MOCK_PROPERTIES if p["status"] == "active"]
 
@@ -188,8 +192,8 @@ def search_properties(city: Optional[str] = None, min_price: Optional[float] = N
     try:
         if DB_AVAILABLE:
             return search_properties_in_db(city=city, min_price=min_price, max_price=max_price, beds=beds)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"search_properties_in_db failed, falling back to mock: {e}")
 
     results = [p for p in _MOCK_PROPERTIES if p["status"] == "active"]
     if city:
