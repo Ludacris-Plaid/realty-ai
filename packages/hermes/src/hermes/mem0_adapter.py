@@ -40,7 +40,7 @@ os.makedirs(MEM0_DIR, exist_ok=True)
 DEFAULT_USER_ID = "athena-user"
 
 
-def _build_embedder_config() -> EmbedderConfig:
+def _build_embedder_config():
     """Build embedder config from env vars.
     
     Provider options (MEM0_EMBEDDER_PROVIDER):
@@ -51,6 +51,7 @@ def _build_embedder_config() -> EmbedderConfig:
     Falls back to openai. If no API key set, runtime operations (add/search)
     will fail gracefully — Mem0 returns empty results, system uses SQLite.
     """
+    from mem0.embeddings.configs import EmbedderConfig
     provider = os.environ.get("MEM0_EMBEDDER_PROVIDER", "openai").lower()
     
     config = {"model": os.environ.get("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")}
@@ -62,13 +63,14 @@ def _build_embedder_config() -> EmbedderConfig:
     return EmbedderConfig(provider=provider, config=config)
 
 
-def _build_llm_config() -> LlmConfig:
+def _build_llm_config():
     """Build LLM config for Mem0 entity extraction.
     
     Provider options (MEM0_LLM_PROVIDER):
       - openai (default): reads OPENAI_API_KEY + OPENAI_BASE_URL
       - ollama: uses local Ollama
     """
+    from mem0.llms.configs import LlmConfig
     provider = os.environ.get("MEM0_LLM_PROVIDER", "openai").lower()
     model = os.environ.get("MEM0_LLM_MODEL", "gpt-4o-mini" if provider == "openai" else "llama3.2")
     return LlmConfig(provider=provider, config={"model": model, "temperature": 0.1})
