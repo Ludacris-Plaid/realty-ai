@@ -41,13 +41,13 @@ def get_nvidia_model() -> str:
 
 # Model names
 def get_fast_model() -> str:
-    return _env("LLM_DEFAULT_MODEL", "unsloth/Qwen2.5-7B-Instruct")
+    return _env("LLM_DEFAULT_MODEL", "Qwen/Qwen3-4B-Instruct-2507")
 
 def get_premium_model() -> str:
-    return _env("LLM_PREMIUM_MODEL", "unsloth/Qwen2.5-14B-Instruct")
+    return _env("LLM_PREMIUM_MODEL", "unsloth/Phi-4-mini-instruct")
 
 def get_local_model() -> str:
-    return _env("LLM_LOCAL_MODEL", "unsloth/gemma-2-9b-it")
+    return _env("LLM_LOCAL_MODEL", "unsloth/gemma-2-2b-it")
 
 
 # ─── Fallback State ────────────────────────────────────────────────────────────
