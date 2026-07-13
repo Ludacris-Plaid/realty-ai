@@ -40,8 +40,48 @@ os.makedirs(MEM0_DIR, exist_ok=True)
 DEFAULT_USER_ID = "athena-user"
 
 
+def _build_embedder_config() -> EmbedderConfig:
+    """Build embedder config from env vars.
+    
+    Provider options (MEM0_EMBEDDER_PROVIDER):
+      - openai (default): reads OPENAI_API_KEY + OPENAI_BASE_URL
+      - ollama: uses local Ollama instance (model: nomic-embed-text)
+      - huggingface: local sentence-transformers
+    
+    Falls back to openai. If no API key set, runtime operations (add/search)
+    will fail gracefully — Mem0 returns empty results, system uses SQLite.
+    """
+    provider = os.environ.get("MEM0_EMBEDDER_PROVIDER", "openai").lower()
+    
+    config = {"model": os.environ.get("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")}
+    if provider == "ollama":
+        config["embedding_dims"] = int(os.environ.get("MEM0_EMBEDDER_DIMS", "768"))
+    elif provider == "huggingface":
+        config["model"] = os.environ.get("MEM0_EMBEDDER_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+    
+    return EmbedderConfig(provider=provider, config=config)
+
+
+def _build_llm_config() -> LlmConfig:
+    """Build LLM config for Mem0 entity extraction.
+    
+    Provider options (MEM0_LLM_PROVIDER):
+      - openai (default): reads OPENAI_API_KEY + OPENAI_BASE_URL
+      - ollama: uses local Ollama
+    """
+    provider = os.environ.get("MEM0_LLM_PROVIDER", "openai").lower()
+    model = os.environ.get("MEM0_LLM_MODEL", "gpt-4o-mini" if provider == "openai" else "llama3.2")
+    return LlmConfig(provider=provider, config={"model": model, "temperature": 0.1})
+
+
 def _create_mem0_instance():
-    """Create a configured Mem0 instance. Mem0 uses Qdrant for vectors + SQLite for history."""
+    """Create a configured Mem0 instance. Mem0 uses Qdrant for vectors + SQLite for history.
+    
+    Embedder config: env MEM0_EMBEDDER_PROVIDER (ollama|openai|huggingface), default ollama.
+    LLM config: env MEM0_LLM_PROVIDER (openai|ollama), default openai (reads OPENAI_* env vars).
+    
+    Both fall through gracefully — init failure → SQLite fallback.
+    """
     try:
         from mem0 import Memory
         from mem0.configs.base import MemoryConfig
@@ -54,27 +94,35 @@ def _create_mem0_instance():
         class TimeoutError(Exception): pass
         def _handler(signum, frame): raise TimeoutError("Mem0 init timed out")
         signal.signal(signal.SIGALRM, _handler)
-        signal.alarm(8)  # 8-second timeout
+        signal.alarm(12)  # 12-second timeout (generous for ollama model pull)
 
         try:
+            embedder = _build_embedder_config()
+            llm = _build_llm_config()
+            
+            # Determine embedding dimensions
+            embed_provider = embedder.provider
+            embed_model = embedder.config.get("model", "unknown")
+            dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "768" if embed_provider == "ollama" else "1536"))
+            
             config = MemoryConfig(
                 vector_store=VectorStoreConfig(
                     provider="qdrant",
                     config={
                         "path": os.path.join(MEM0_DIR, "qdrant"),
                         "collection_name": "athena_memories",
-                        "embedding_model_dims": 1536,
+                        "embedding_model_dims": dims,
                         "on_disk": True,
                     },
                 ),
-                embedder=EmbedderConfig(provider="openai", config={}),
-                llm=LlmConfig(provider="openai", config={}),
+                embedder=embedder,
+                llm=llm,
                 history_db_path=os.path.join(MEM0_DIR, "mem0_history.db"),
                 version="v1.1",
             )
             instance = Memory(config=config)
             signal.alarm(0)
-            logger.info(f"Mem0 initialized (Qdrant: {os.path.join(MEM0_DIR, 'qdrant')})")
+            logger.info(f"Mem0 initialized (embedder={embed_provider}/{embed_model}, llm_provider={llm.provider}, dims={dims})")
             return instance
         except TimeoutError:
             signal.alarm(0)
@@ -82,7 +130,7 @@ def _create_mem0_instance():
             return None
         except Exception as e:
             signal.alarm(0)
-            logger.warning(f"Mem0 initialization failed: {e}. Falling back to SQLite-only memory.")
+            logger.warning(f"Mem0 init failed: {e}. Falling back to SQLite-only memory.")
             return None
     except ImportError as e:
         logger.warning(f"Mem0 package not installed: {e}. Falling back to SQLite-only memory.")

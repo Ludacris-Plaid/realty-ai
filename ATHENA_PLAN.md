@@ -76,18 +76,11 @@
 | 2.2 | Telegram bot adapter | ✅ Done | `bots.telegram` module — handles webhook updates, sends typing indicator, routes to Athena, formats responses. `set_webhook()` to register URL. Enable by setting `TELEGRAM_BOT_TOKEN` env var. |
 | 2.3 | Slack bot adapter | ✅ Done | `bots.slack` module — handles Events API (messages), verifies Slack signing secret, handles URL verification challenge, routes to Athena. Enable by setting `SLACK_BOT_TOKEN` + `SLACK_SIGNING_SECRET` env vars. |
 | 2.4 | Bot status dashboard | ✅ Done | `GET /api/v1/athena/bots/status` — shows which integrations are configured. |
-| 2.5 | Integrate Mem0 | ☐ Pending | Replace SQLite user facts with Mem0 managed memory layer for automatic entity extraction and semantic memory search. |
+| 2.5 | Integrate Mem0 | 🟡 Partial | Adapter exists (`hermes/mem0_adapter.py`) with Qdrant vector store, automatic entity extraction, semantic search, cross-session context retrieval. Wired into `agent.py` post-chat learning loop + memory injection. Needs production verification: pip package install, init timeout on Railway, Qdrant disk usage. |
 | 2.6 | User profiles | ☐ Pending | Multi-agent firm support — each agent has their own Athena profile, memory, and preferences. Requires auth layer. |
-| 2.7 | Conversation search | ☐ Pending | Full-text + semantic search across all past conversations from any channel. |
-| 2.8 | Cross-session context | ☐ Pending | When resuming, Athena should say "Welcome back — Mike Chen's offer was accepted yesterday" — not the generic greeting. |
-| 2.9 | Memory dashboard | ☐ Pending | Visual interface in the web dashboard showing what Athena knows about you. Edit/delete facts.
-| 2.3 | Conversation search | Full-text + semantic search across all past conversations. "What did we discuss about the Windermere listing last week?" |
-| 2.4 | Cross-session context | When a new conversation starts, Athena should say "Welcome back — Mike Chen's offer was accepted yesterday" — not the generic greeting. |
-| 2.5 | Integrate Mem0 | ☐ Pending | Replace SQLite user facts with Mem0 managed memory layer for automatic entity extraction and semantic memory search. |
-| 2.6 | User profiles | ☐ Pending | Multi-agent firm support — each agent has their own Athena profile, memory, and preferences. Requires auth layer. |
-| 2.7 | Conversation search | ☐ Pending | Full-text + semantic search across all past conversations from any channel. |
-| 2.8 | Cross-session context | ☐ Pending | When resuming, Athena should say "Welcome back — Mike Chen's offer was accepted yesterday" — not the generic greeting. |
-| 2.9 | Memory dashboard | ☐ Pending | Visual interface in the web dashboard showing what Athena knows about you. Edit/delete facts. |
+| 2.7 | Conversation search | 🟡 Partial | FTS5 full-text search on past conversations works (SQLite). Semantic cross-session search via Mem0 works. No unified search UI combining both. |
+| 2.8 | Cross-session context | ☐ Pending | Mem0 `get_relevant_context()` wired into system prompt, but greeting is still generic ("Good morning") — no personalized "Welcome back, Mike's offer was accepted" yet. |
+| 2.9 | Memory dashboard | ✅ Done | Frontend Memory view tab shows profile + skills. CRUD API endpoints at `/api/v1/athena/memories` (list, search, delete, count). Edit/delete facts via API. |
 
 **Device continuity**: All conversations are stored server-side. You can start on Telegram, continue on the web dashboard, then follow up via Slack — the same Athena, the same memory, the same conversation history. **scrcpy is not needed** for this use case — scrcpy is a screen mirroring tool (displays Android screen on desktop), not a session migration tool. Server-side state with multi-channel support is the correct architecture for device continuity.
 

@@ -217,6 +217,38 @@ async def seed_database():
         from src.models import User, Lead, Property, AgentProfile, Client, Document, Conversation, Message, AIMemory, Workflow, WorkflowStep
         Base.metadata.create_all(engine)
         
+        # Create activities and approvals tables (raw SQL — not yet in ORM models)
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS activities (
+                    id UUID PRIMARY KEY,
+                    organization_id UUID NOT NULL,
+                    user_id UUID NOT NULL,
+                    agent_name TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    intent TEXT DEFAULT 'general',
+                    model_used TEXT DEFAULT 'fast-model',
+                    status TEXT DEFAULT 'success',
+                    metadata JSONB DEFAULT '{}',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS approvals (
+                    id UUID PRIMARY KEY,
+                    action_type TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    details JSONB DEFAULT '{}',
+                    agent_name TEXT DEFAULT 'General Assistant',
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    reviewed_at TIMESTAMPTZ,
+                    reviewed_by TEXT,
+                    notes TEXT
+                )
+            """))
+            conn.commit()
+        
         # Seed data
         import uuid
         from datetime import datetime

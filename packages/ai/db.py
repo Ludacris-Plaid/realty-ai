@@ -298,3 +298,131 @@ def get_recent_activities_from_db(limit: int = 20, organization_id: Optional[str
         }
         for r in rows
     ]
+
+
+# ─── Approval Queries ──────────────────────────────────────────────────────────
+
+def create_approval_in_db(action_type: str, summary: str, details: dict,
+                           agent_name: str = "General Assistant",
+                           requires_human: bool = True) -> str:
+    """Create an approval request in the database."""
+    approval_id = str(uuid.uuid4())
+    status = "pending" if requires_human else "approved"
+    with Session(engine) as session:
+        session.execute(
+            text("""
+                INSERT INTO approvals (id, action_type, summary, details, agent_name, status)
+                VALUES (:id, :action_type, :summary, :details, :agent_name, :status)
+            """),
+            {
+                "id": approval_id,
+                "action_type": action_type,
+                "summary": summary,
+                "details": details,
+                "agent_name": agent_name,
+                "status": status,
+            }
+        )
+        session.commit()
+    return approval_id
+
+
+def get_pending_approvals_from_db(limit: int = 50) -> list[dict]:
+    """Return all pending approval requests."""
+    with Session(engine) as session:
+        rows = session.execute(
+            text("""
+                SELECT id, action_type, summary, details, agent_name, status, created_at
+                FROM approvals WHERE status = 'pending'
+                ORDER BY created_at DESC LIMIT :lim
+            """),
+            {"lim": limit}
+        ).fetchall()
+
+    return [
+        {
+            "id": str(r[0]),
+            "action_type": r[1],
+            "summary": r[2],
+            "details": r[3] if isinstance(r[3], dict) else {},
+            "agent_name": r[4],
+            "status": r[5],
+            "created_at": r[6].isoformat() if r[6] else None,
+        }
+        for r in rows
+    ]
+
+
+def approve_in_db(approval_id: str, reviewer: str = "Agent", notes: str = None) -> Optional[dict]:
+    """Approve a pending action. Returns the entry or None if not found/already reviewed."""
+    with Session(engine) as session:
+        result = session.execute(
+            text("""
+                UPDATE approvals SET status = 'approved',
+                    reviewed_at = NOW(), reviewed_by = :reviewer, notes = :notes
+                WHERE id = :id AND status = 'pending'
+                RETURNING id, action_type, summary, status, reviewed_by
+            """),
+            {"id": approval_id, "reviewer": reviewer, "notes": notes}
+        ).fetchone()
+        session.commit()
+        if not result:
+            return None
+        return {
+            "id": str(result[0]),
+            "action_type": result[1],
+            "summary": result[2],
+            "status": result[3],
+            "reviewed_by": result[4],
+        }
+
+
+def reject_in_db(approval_id: str, reviewer: str = "Agent", reason: str = None) -> Optional[dict]:
+    """Reject a pending action. Returns the entry or None."""
+    with Session(engine) as session:
+        result = session.execute(
+            text("""
+                UPDATE approvals SET status = 'rejected',
+                    reviewed_at = NOW(), reviewed_by = :reviewer, notes = :reason
+                WHERE id = :id AND status = 'pending'
+                RETURNING id, action_type, summary, status, reviewed_by
+            """),
+            {"id": approval_id, "reviewer": reviewer, "reason": reason}
+        ).fetchone()
+        session.commit()
+        if not result:
+            return None
+        return {
+            "id": str(result[0]),
+            "action_type": result[1],
+            "summary": result[2],
+            "status": result[3],
+            "reviewed_by": result[4],
+        }
+
+
+def get_approval_history_from_db(limit: int = 20) -> list[dict]:
+    """Return recent approval decisions."""
+    with Session(engine) as session:
+        rows = session.execute(
+            text("""
+                SELECT id, action_type, summary, agent_name, status, created_at, reviewed_at, reviewed_by
+                FROM approvals WHERE status != 'pending'
+                ORDER BY reviewed_at DESC LIMIT :lim
+            """),
+            {"lim": limit}
+        ).fetchall()
+
+    return [
+        {
+            "id": str(r[0]),
+            "action_type": r[1],
+            "summary": r[2],
+            "agent_name": r[3],
+            "status": r[4],
+            "created_at": r[5].isoformat() if r[5] else None,
+            "reviewed_at": r[6].isoformat() if r[6] else None,
+            "reviewed_by": r[7],
+        }
+        for r in rows
+    ]
