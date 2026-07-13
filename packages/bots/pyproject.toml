@@ -4,14 +4,8 @@ version = "0.1.0"
 description = "Athena multi-channel bot adapters (Telegram, Slack)"
 requires-python = ">=3.11"
 dependencies = [
-    "python-telegram-bot>=21.0",
-    "slack-sdk>=3.27",
-    "slack-bolt>=1.18",
+    "httpx>=0.28.0",
 ]
-
-[build-system]
-requires = ["setuptools>=64"]
-build-backend = "setuptools.backends._legacy:_Backend"
 
 [tool.setuptools.packages.find]
 where = ["src"]

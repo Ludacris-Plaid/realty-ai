@@ -16,6 +16,3 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["ai", "ai.agents", "ai.crews"]
 
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
