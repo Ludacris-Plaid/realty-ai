@@ -83,9 +83,9 @@ def get_model(model_name: Optional[str] = None) -> ChatOpenAI:
         model_name: Model ID override. For fallback, uses NVIDIA's configured model.
     """
     if _should_use_fallback() or not get_featherless_key():
-        # Use NVIDIA fallback
+        # Use NVIDIA fallback — ignore model_name, force NVIDIA's model
         return ChatOpenAI(
-            model=model_name or get_nvidia_model(),
+            model=get_nvidia_model(),
             base_url=get_nvidia_base(),
             api_key=get_nvidia_key(),
             temperature=0.2,

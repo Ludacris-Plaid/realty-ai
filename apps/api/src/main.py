@@ -18,6 +18,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sys, os
+
+# Load .env into environment BEFORE any AI imports (so models.py can read them)
+_env_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip("\"'")
+                os.environ.setdefault(k, v)
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "ai"))
 
 from agent import ask
