@@ -20,7 +20,13 @@ Architecture:
 from datetime import datetime
 from typing import Optional
 
-from .tools import get_hot_leads, get_lead_count, get_active_listings
+# Dual-context import: in the API, `briefing` is a top-level module (PYTHONPATH
+# includes /packages/ai) so `tools` is top-level. In the worker it is imported as
+# `packages.ai.briefing`, so `tools` is a relative sibling. Handle both.
+try:
+    from .tools import get_hot_leads, get_lead_count, get_active_listings
+except ImportError:
+    from tools import get_hot_leads, get_lead_count, get_active_listings
 
 
 # ─── Briefing Sections ──────────────────────────────────────────────────────
