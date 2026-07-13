@@ -3,6 +3,9 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip and setuptools for PEP 517/518 editable installs
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # Install monorepo packages first
 COPY packages/database /packages/database
 COPY packages/ai /packages/ai

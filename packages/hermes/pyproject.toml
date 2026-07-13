@@ -18,3 +18,7 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["hermes", "hermes.*"]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
