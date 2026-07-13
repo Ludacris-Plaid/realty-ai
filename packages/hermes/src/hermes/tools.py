@@ -96,8 +96,8 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "run_crew",
-        "description": "Execute a CrewAI crew for a specific task. Can run marketing crews, listing crews, etc.",
-        "parameters": {"crew_name": {"type": "string", "description": "Crew name: marketing_crew, listing_crew, lead_scoring_crew", "required": True}, "input_data": {"type": "string", "description": "JSON string of input data for the crew", "required": False}}
+        "description": "Run a specialist crew and return its structured output (JSON) to YOU so you stay in control and can act on the data. Pass crew_name (marketing_crew, listing_crew, lead_scoring_crew, transaction_crew, document_crew, research_crew) and input_data as a JSON string with concrete parameters (e.g. {\"address\": \"123 Main St\"}, {\"closing_date\": \"2026-08-01\"}, {\"contract_text\": \"...\"}, {\"city\": \"Calgary\"}). The crew pulls REAL data from the database and returns it for you to summarize, decide, and present.",
+        "parameters": {"crew_name": {"type": "string", "description": "Crew name: marketing_crew, listing_crew, lead_scoring_crew, transaction_crew, document_crew, research_crew", "required": True}, "input_data": {"type": "string", "description": "JSON string of input data for the crew (address / closing_date / contract_text / city etc.)", "required": False}}
     },
     {
         "name": "system_overview",
@@ -730,75 +730,152 @@ def _get_crew_info() -> str:
     return result
 
 
-def _run_crew(crew_name: str, input_data: str = "{}") -> str:
-    """Execute a crew or specialist agent. Falls back to specialist agent routing if crew module unavailable."""
+import logging as _logging
+_crew_log = _logging.getLogger(__name__)
+
+
+def _crew_arg(d: dict, *keys, default=None):
+    """Pull a value from a crew input dict, checking top level and common
+    nested wrappers (property_details / property / input / data)."""
+    for k in keys:
+        if k in d and d[k] not in (None, ""):
+            return d[k]
+    for wrap in ("property_details", "property", "input", "data", "details"):
+        sub = d.get(wrap)
+        if isinstance(sub, dict):
+            for k in keys:
+                if k in sub and sub[k] not in (None, ""):
+                    return sub[k]
+    return default
+
+
+def _format_crew_output(crew_name: str, data, source: str = "crew") -> str:
+    """Render crew data as a JSON block Athena can parse and act on."""
     import json as _json
-    
     try:
-        input_dict = _json.loads(input_data) if isinstance(input_data, str) else input_data
-    except (_json.JSONDecodeError, ValueError):
-        input_dict = {"input": str(input_data)}
-    
-    # Map common crew names to specialist agent tools
-    crew_agent_map = {
-        "lead_scoring_crew": "Lead Agent",
-        "lead_crew": "Lead Agent",
-        "marketing_crew": "Marketing Agent",
-        "listing_crew": "Listing Agent",
-        "transaction_crew": "Transaction Agent",
-        "document_crew": "Document Agent",
-        "research_crew": "Research Agent",
-    }
-    
-    # Try to import and run the actual CrewAI crew module
-    import importlib, sys as _sys
-    crew_module_path = f"crews.{crew_name}"
-    
-    # Check if the crew module exists and has a run function
-    try:
-        # Try dynamic import of the crew module
-        crew_module = importlib.import_module(crew_module_path, package="packages.ai")
-        if hasattr(crew_module, 'run_crew'):
-            result = crew_module.run_crew(**input_dict)
-            return f"**Crew '{crew_name}' executed successfully.**\n\nResult:\n{str(result)[:1000]}"
-        elif hasattr(crew_module, 'crew'):
-            result = crew_module.crew.kickoff(inputs=input_dict)
-            return f"**Crew '{crew_name}' completed.**\n\nResult:\n{str(result)[:1000]}"
-    except (ImportError, AttributeError, Exception) as e:
-        # Crew module not available — delegate to specialist agent
-        agent_name = crew_agent_map.get(crew_name, "General Assistant")
-        
-        # Execute the relevant tool based on crew type
-        input_text = input_dict.get("input", input_dict.get("message", str(input_dict)))
-        
-        tool_actions = {
-            "lead_scoring_crew": f"Running lead analysis pipeline for: {input_text}",
-            "marketing_crew": f"Running marketing campaign for: {input_text}",
-            "listing_crew": f"Running listing analysis for: {input_text}",
-            "transaction_crew": f"Running transaction check for: {input_text}",
-            "document_crew": f"Running document analysis for: {input_text}",
-            "research_crew": f"Running market research for: {input_text}",
+        payload = _json.dumps(data, indent=2, default=str)
+    except TypeError:
+        payload = str(data)
+    return f"**Crew '{crew_name}' → {source}**\n\n```json\n{payload}\n```"
+
+
+def _run_specialist_crew(crew_name: str, d: dict) -> str:
+    """Delegate a crew to the real specialist agents, which pull REAL data
+    from the database / generate real content. Returns structured output."""
+    results: dict = {}
+    cn = (crew_name or "").lower()
+
+    if "marketing" in cn:
+        from agents.marketing_agent import create_listing_post, campaign_plan
+        addr = _crew_arg(d, "address", "property_address", "listing_address", "property", "address_street")
+        if addr:
+            results["listing_post"] = create_listing_post.invoke({"address": addr})
+            results["campaign_plan"] = campaign_plan.invoke({"property_address": addr})
+
+    elif "listing" in cn:
+        from agents.listing_agent import generate_mls_description, compare_properties
+        a1 = _crew_arg(d, "address", "address1", "property_address", "property")
+        a2 = _crew_arg(d, "address2")
+        if a1:
+            results["mls_description"] = generate_mls_description.invoke({"address": a1})
+        if a1 and a2:
+            results["comparison"] = compare_properties.invoke({"address1": a1, "address2": a2})
+
+    elif "lead" in cn:
+        from agents.lead_agent import pipeline_summary, qualify_lead
+        results["pipeline"] = pipeline_summary.invoke({})
+        name = _crew_arg(d, "name", "lead_name", "full_name", "client_name")
+        if name:
+            results["lead"] = qualify_lead.invoke({"name": name})
+
+    elif "transaction" in cn:
+        from agents.transaction_agent import analyze_deadlines, generate_reminder
+        cd = _crew_arg(d, "closing_date", "date")
+        if cd:
+            args = {"closing_date": cd}
+            for opt in ("inspection_days", "financing_days"):
+                if opt in d:
+                    args[opt] = d[opt]
+            results["timeline"] = analyze_deadlines.invoke(args)
+        detail = _crew_arg(d, "detail", "reminder_detail")
+        due = _crew_arg(d, "due_date")
+        if detail and due:
+            results["reminder"] = generate_reminder.invoke({
+                "transaction_type": _crew_arg(d, "transaction_type", default="closing") or "closing",
+                "detail": detail, "due_date": due,
+            })
+
+    elif "document" in cn:
+        from agents.document_agent import summarize_contract, extract_deadlines
+        text = _crew_arg(d, "contract_text", "text", "contract", "document_text")
+        if text:
+            results["summary"] = summarize_contract.invoke({"contract_text": text})
+            results["deadlines"] = extract_deadlines.invoke({"contract_text": text})
+
+    elif "research" in cn:
+        from agents.research_agent import market_snapshot, compare_neighborhoods
+        city = _crew_arg(d, "city", "location")
+        if city:
+            results["market_snapshot"] = market_snapshot.invoke({"city": city})
+        n1 = _crew_arg(d, "neighborhood_1", "neighborhood1")
+        n2 = _crew_arg(d, "neighborhood_2", "neighborhood2")
+        if n1 and n2:
+            results["comparison"] = compare_neighborhoods.invoke({
+                "neighborhood_1": n1, "neighborhood_2": n2, "city": city or ""
+            })
+
+    if not results:
+        # Athena still gets a clear, actionable status (never None).
+        results = {
+            "status": "no_data_extracted",
+            "crew": crew_name,
+            "received_keys": list(d.keys()),
+            "hint": "Provide concrete parameters (e.g. address, closing_date, contract_text, city) so the specialist agents can pull data.",
         }
-        
-        action = tool_actions.get(crew_name, f"Running {agent_name} for: {input_text}")
-        
-        # Actually call a relevant tool based on crew type
-        if "lead" in crew_name:
-            result = _analyze_pipeline()
-        elif "market" in crew_name:
-            result = _get_dashboard_summary()
-        elif "listing" in crew_name:
-            try:
-                result = _list_listings(input_dict.get("status"))
-            except:
-                result = _list_listings()
-        else:
-            result = f"CrewAI module for '{crew_name}' is being prepared. I routed this to the **{agent_name}** instead.\n\n{action}"
-        
-        return (
-            f"**Crew '{crew_name}' delegated to {agent_name}** 🔀\n\n"
-            f"The CrewAI module is being set up, so I've routed this to my built-in specialist agent.\n\n"
-            f"{result}"
+
+    return _format_crew_output(crew_name, results, source="Specialist Agents")
+
+
+def _run_crew(crew_name: str, input_data: str = "{}") -> str:
+    """Execute a crew and return its data to Athena.
+
+    Athena is the orchestrator: she calls run_crew and receives the crew's
+    structured output (JSON) so she can decide what to do next. Resolution:
+      1. If a real CrewAI module (crews/<name>) is implemented with run_crew()
+         or a `crew` object, run it and return its output.
+      2. Otherwise delegate to the matching specialist agent(s), which pull
+         REAL data from the database / generate real content.
+    Never returns None.
+    """
+    import json as _json
+    try:
+        input_dict = _json.loads(input_data) if isinstance(input_data, str) else dict(input_data)
+    except (_json.JSONDecodeError, ValueError, TypeError):
+        input_dict = {"input": str(input_data)}
+
+    # ── 1) Real CrewAI crew (if implemented & installed) ───────────────────
+    try:
+        import importlib
+        crew_module = importlib.import_module(f"crews.{crew_name}", package="packages.ai")
+        if hasattr(crew_module, "run_crew"):
+            result = crew_module.run_crew(**input_dict)
+            return _format_crew_output(crew_name, result, source="CrewAI")
+        if hasattr(crew_module, "crew"):
+            result = crew_module.crew.kickoff(inputs=input_dict)
+            return _format_crew_output(crew_name, result, source="CrewAI")
+    except Exception as e:
+        _crew_log.warning(
+            "run_crew: real CrewAI module for '%s' unavailable (%s); using specialist agents",
+            crew_name, e,
+        )
+
+    # ── 2) Specialist agents (real data) ──────────────────────────────────
+    try:
+        return _run_specialist_crew(crew_name, input_dict)
+    except Exception as e:
+        _crew_log.exception("run_crew: specialist delegation failed for '%s'", crew_name)
+        return _format_crew_output(
+            crew_name, {"error": f"Crew execution failed: {e}"}, source="error"
         )
 
 
