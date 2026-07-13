@@ -11,7 +11,7 @@ import { fetchFromApi } from "@/lib/api";
 const agentMeta: Record<string, { name: string; description: string; icon: React.ElementType; color: string }> = {
   lead: { name: "Lead Agent", description: "Qualifies leads, scores pipeline, recommends follow-ups", icon: UserCheck, color: "bg-blue-500" },
   listing: { name: "Listing Agent", description: "Generates MLS descriptions, compares properties", icon: FileText, color: "bg-emerald-500" },
-  marketing: { name: "Marketing Agent", description: "Creates campaigns, social posts, content", icon: Megaphone, color: "bg-purple-500" },
+  marketing: { name: "Marketing Agent", description: "Creates campaigns, social posts, content", icon: Megaphone, color: "bg-amber-500" },
   transaction: { name: "Transaction Agent", description: "Tracks deadlines, manages contract dates", icon: Shield, color: "bg-amber-500" },
   document: { name: "Document Agent", description: "Analyzes contracts, extracts key terms", icon: Search, color: "bg-rose-500" },
   research: { name: "Research Agent", description: "Market trends, neighborhood insights", icon: BarChart, color: "bg-cyan-500" },

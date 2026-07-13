@@ -7,7 +7,7 @@ const statuses = [
   { label: "Qualifying", color: "bg-indigo-100 text-indigo-700 border-indigo-200", desc: "Agent or AI has initiated contact. Gathering needs, budget, and timeline." },
   { label: "Qualified", color: "bg-emerald-100 text-emerald-700 border-emerald-200", desc: "Lead confirmed as a serious prospect with clear requirements and financing." },
   { label: "Contacted", color: "bg-amber-100 text-amber-700 border-amber-200", desc: "Showing or property recommendations have been shared. Awaiting response." },
-  { label: "Appointment Set", color: "bg-purple-100 text-purple-700 border-purple-200", desc: "Showing, open house, or consultation scheduled on the calendar." },
+  { label: "Appointment Set", color: "bg-amber-100 text-amber-700 border-amber-200", desc: "Showing, open house, or consultation scheduled on the calendar." },
   { label: "Closed Won", color: "bg-emerald-100 text-emerald-700 border-emerald-200", desc: "Deal closed. Lead converted to client." },
   { label: "Closed Lost", color: "bg-red-100 text-red-700 border-red-200", desc: "Lead disqualified or deal fell through. Reason recorded for analysis." },
 ];

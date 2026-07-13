@@ -1,7 +1,7 @@
 [project]
-name = "realty-hermes-agent"
+name = "realty-athena-agent"
 version = "0.1.0"
-description = "Hermes-style persistent agent for RealtyAI — learns user, controls system via NL"
+description = "Athena — your digital secretary. Learns your style, remembers everything, runs the show."
 requires-python = ">=3.12"
 dependencies = [
     "langgraph>=0.2.0",

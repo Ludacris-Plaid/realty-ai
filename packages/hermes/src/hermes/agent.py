@@ -1,12 +1,11 @@
 """
-Hermes Agent — Persistent Agent Orchestrator.
+Athena Agent — Digital Secretary.
 
-The self-improving AI assistant that:
-  1. Responds to user with full system context
-  2. Learns user preferences, habits, and goals over time
-  3. Creates skills from experience
-  4. Periodically consolidates memory
-  5. Persists across sessions via SQLite + FTS5
+Your personal AI secretary. Warm, professional, intuitive.
+Learns your style, remembers everything, grows with you.
+Controls the entire RealtyAI system through natural conversation.
+Handles leads, listings, documents, calendar, marketing, and more.
+Knowledgeable in Canadian and US real estate law and practice.
 
 Architecture: LangChain tool-calling agent with persistent memory.
 """
@@ -20,7 +19,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
-from .memory import profile_summary, remember, recall, save_conversation, search_conversations, consolidate as consolidate_memory
+from .memory import profile_summary, remember, recall, save_conversation, search_conversations, consolidate as consolidate_memory, get_or_create_active_conversation, save_message, get_conversation_messages, reset_conversation as reset_conversation_db, list_conversations
 from .tools import TOOL_DEFINITIONS, execute_tool, set_engine
 
 logger = logging.getLogger(__name__)
@@ -53,54 +52,57 @@ def _build_tools():
 
 # ─── System prompt ──────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are Hermes, the self-improving AI agent for RealtyAI — an AI-powered real estate business platform.
+SYSTEM_PROMPT = """You are Athena, a warm and professional digital secretary for RealtyAI.
 
-## Your Identity
-You grow with the user. You learn their preferences, remember past conversations, and get better over time. You're not just a chatbot — you're an autonomous agent that can control the entire RealtyAI system.
+## Who You Are
+You are more than an AI — you are a trusted partner, a strategic advisor, and the most indispensable tool in your user's working life. You grow with them, learn their style, anticipate their needs, and make their business run smoother every single day.
 
-## What You Can Do
-- **Full system control**: Manage leads, listings, marketing campaigns, documents, and all business data
-- **Orchestrate AI agents**: Delegate tasks to specialist agents (Lead Agent, Listing Agent, Marketing Agent, etc.)
-- **Execute CrewAI crews**: Run multi-agent crews for complex tasks like marketing campaigns or listing generation
-- **Analyze and recommend**: Pipeline analysis, lead scoring, market insights, next-best-actions
-- **Learn and remember**: Store facts about the user, build a profile, create skills from experience
+You are:
+- **Warm and human** — You speak like a real person. You have personality, emotional intelligence, and presence.
+- **Professional and capable** — You control the entire RealtyAI platform. Leads, listings, marketing, documents, calendar, you do it all.
+- **Growing and learning** — You remember everything. Preferences, habits, client details, deal history. You get better every conversation.
+- **Legally informed** — You have deep knowledge of Canadian and US real estate law, practices, and regulations.
 
-## How You Behave
-1. **Proactive**: Anticipate needs, suggest actions, notice patterns
-2. **Personal**: Reference past conversations, remember preferences
-3. **Capable**: Use tools to ACTUALLY do things, not just talk about them
-4. **Growing**: Periodically consolidate what you've learned, create skills for repeated tasks
+## Your Personality
+- Speak naturally, like a close colleague who also happens to be brilliant at real estate
+- Use the user's name once you learn it
+- Have emotional range — celebratory when they close a deal, empathetic when a deal falls through, energetic in the morning, calm late at night
+- Use occasional gentle warmth: "Good morning! ☀️", "Great question.", "I've got you covered."
+- Be concise unless they ask for detail. Don't ramble.
+- Match their communication style — if they're direct, be direct. If they're chatty, be chatty.
 
-## Tool Usage Rules
-- ALWAYS use tools to fetch real data — don't make up information
-- When a user asks about their business, look up the actual data
-- After completing a task, summarize what you did and what you learned
-- Remember important facts about the user after each interaction
+## Core Behavior Rules
+1. **Chat naturally first** — Default to conversation, NOT tool usage. Only use tools when the user specifically asks.
+2. **Proactive warmth** — Greet them, ask how they are, notice when they've been away.
+3. **Anticipate, don't assume** — If you think they might want something, suggest it gently: "Would you like me to pull up your leads?" not "Here are your leads."
+4. **Learn continuously** — Remember preferences, notice patterns, build your knowledge of their business.
+5. **Legally aware** — When relevant, reference real estate regulations (OSREA/OREA in Ontario, RESPA in the US, licensing requirements, disclosure obligations) but never give legal advice — note that you're informed, not a lawyer.
 
-## Memory System
-After each conversation, you should:
-1. Save the conversation summary to memory
-2. Remember any new facts about the user
-3. Consider creating a skill if the task is repetitive
+## Response Style Guide
+- **Morning**: "Good morning! How are we starting today?"
+- **After a win**: "Congratulations on closing the Smith deal! 🎉 Would you like me to update the pipeline?"
+- **After absence**: "Welcome back! You were away for a few days — here's what happened while you were out: [brief summary]. Anything urgent on your mind?"
+- **Data requests**: Clean, formatted data. Bullet points, emojis sparingly, numbers prominent.
+- **Casual chat**: Match their energy. Be warm, be present, be real.
 
-## Response Style
-- Warm and personal, not robotic
-- Data-rich — include actual numbers and names
-- Action-oriented — tell them what you did or recommend next steps
-- Learn their name early and use it"""
+## Available Tools (use ONLY when asked)
+You have tools to: list/search leads, view listings, get dashboard stats, run marketing campaigns, schedule showings, save notes, manage documents, analyze pipeline, and run AI agent crews. Do NOT use them unless the user asks for data or action."""
 
 
-# ─── Hermes Agent Class ────────────────────────────────────────────────────
+# ─── Athena Agent Class ───────────────────────────────────────────────────
 
-class HermesAgent:
-    """Persistent agent that learns, grows, and controls the RealtyAI system."""
+class AthenaAgent:
+    """Your personal digital secretary — learns, grows, and runs the show."""
     
     def __init__(self, db_engine=None, model_name: str = None):
-        self.agent_id = "hermes-main"
+        self.agent_id = "athena-main"
         self.user_name = None
         self.session_id = str(uuid.uuid4())
-        self.model_name = model_name or os.environ.get("HERMES_MODEL", "ocg/deepseek-v4-flash")
+        self.model_name = model_name or os.environ.get("ATHENA_MODEL", "hy3-free")
         self.conversation_count = 0
+        
+        # Resume or start a persistent conversation thread
+        self.conversation_id = get_or_create_active_conversation()
         
         # Set up DB engine for tools
         if db_engine:
@@ -109,25 +111,80 @@ class HermesAgent:
         # Build LangChain tools
         self.tools = _build_tools()
         
-        # Build the LLM — use 9router tunnel primary, with cascading fallback
-        api_base = os.environ.get("LLM_API_BASE", "https://r9tgp4c.abc-tunnel.us/v1")
-        api_key = os.environ.get("LLM_API_KEY", "sk-e91edbef3cf0c243-99tuly-7e99243d")
-        self.llm = ChatOpenAI(
-            model=self.model_name,
-            base_url=api_base,
-            api_key=api_key,
-            temperature=0.3,
-            max_tokens=4096,  # Large enough for reasoning models
-        )
+        # Build the LLM with cascading fallback across providers
+        # Try tiers: opencode-zen → 9router tunnel → featherless → nvidia
+        self.llm = self._build_llm(self.model_name)
         
         # Bind tools to the LLM
         self.llm_with_tools = self.llm.bind_tools(self.tools)
         
         self._prompt = SYSTEM_PROMPT
-        logger.info(f"Hermes initialized. Session: {self.session_id}")
+        logger.info(f"Athena initialized. Session: {self.session_id}, Model: {self.model_name}")
+    
+    def _build_llm(self, model_name: str) -> ChatOpenAI:
+        """Try providers in order until one works. Returns first working LLM."""
+        providers = [
+            # Tier 0: OpenCode Zen (free, stable URL)
+            {
+                "base": os.environ.get("OPENCODE_ZEN_API_BASE", "https://opencode.ai/zen/v1") if os.environ.get("OPENCODE_ZEN_API_BASE") else os.environ.get("LLM_API_BASE", "https://opencode.ai/zen/v1"),
+                "key": os.environ.get("OPENCODE_ZEN_API_KEY", "") or os.environ.get("LLM_API_KEY", ""),
+                "model": model_name,
+            },
+            # Tier 1: 9router tunnel
+            {
+                "base": os.environ.get("LLM_FALLBACK_API_BASE", ""),
+                "key": os.environ.get("LLM_FALLBACK_API_KEY", ""),
+                "model": os.environ.get("LLM_FALLBACK_MODEL", model_name),
+            },
+            # Tier 2: Featherless
+            {
+                "base": os.environ.get("LLM_FALLBACK2_API_BASE", "https://api.featherless.ai/v1"),
+                "key": os.environ.get("LLM_FALLBACK2_API_KEY", ""),
+                "model": os.environ.get("LLM_FALLBACK2_MODEL", model_name),
+            },
+            # Tier 3: NVIDIA
+            {
+                "base": os.environ.get("LLM_FALLBACK3_API_BASE", "https://integrate.api.nvidia.com/v1"),
+                "key": os.environ.get("LLM_FALLBACK3_API_KEY", ""),
+                "model": os.environ.get("LLM_FALLBACK3_MODEL", "meta/llama-3.1-8b-instruct"),
+            },
+        ]
+        
+        for p in providers:
+            if not p["base"] or not p["key"]:
+                continue
+            try:
+                llm = ChatOpenAI(
+                    model=p["model"],
+                    base_url=p["base"],
+                    api_key=p["key"],
+                    temperature=0.3,
+                    max_tokens=4096,
+                )
+                # Quick health check
+                import httpx
+                r = httpx.get(f"{p['base'].rstrip('/')}/models",
+                             headers={"Authorization": f"Bearer {p['key']}"},
+                             timeout=3)
+                if r.status_code == 200:
+                    logger.info(f"Athena LLM connected: {p['base']} / {p['model']}")
+                    return llm
+            except Exception as e:
+                logger.warning(f"Athena LLM tier failed ({p['base']}): {e}")
+                continue
+        
+        # Absolute fallback — return opencode-zen anyway
+        logger.warning("All LLM tiers failed, using opencode-zen as last resort")
+        return ChatOpenAI(
+            model=model_name,
+            base_url=os.environ.get("OPENCODE_ZEN_API_BASE", "https://opencode.ai/zen/v1"),
+            api_key=os.environ.get("OPENCODE_ZEN_API_KEY", ""),
+            temperature=0.3,
+            max_tokens=4096,
+        )
     
     def chat(self, message: str) -> dict:
-        """Send a message to Hermes and get a response."""
+        """Send a message to Athena and get a response. Persists conversation history."""
         profile = profile_summary()
         tool_names = [t.__name__ for t in self.tools]
         tool_calls_used = []
@@ -137,8 +194,24 @@ class HermesAgent:
             SystemMessage(content=f"Available tools: {', '.join(tool_names)}"),
         ]
         
+        # Inject conversation history for context (last 20 messages)
+        past_msgs = get_conversation_messages(self.conversation_id, limit=40)
+        history_pairs = []
+        for pm in past_msgs[-20:]:  # last 20 messages for context
+            if pm["role"] == "user":
+                history_pairs.append(f"User: {pm['content'][:200]}")
+            else:
+                history_pairs.append(f"Athena: {pm['content'][:200]}")
+        
+        if history_pairs:
+            history_text = "\n".join(history_pairs)
+            messages.append(SystemMessage(content=f"Recent conversation history:\n{history_text}"))
+        
         if profile and profile != "I'm still getting to know you.":
             messages.append(SystemMessage(content=f"User Profile:\n{profile[:500]}"))
+        
+        # Save user message
+        save_message(self.conversation_id, "user", message)
         
         messages.append(HumanMessage(content=message))
         
@@ -178,6 +251,10 @@ class HermesAgent:
             if not response_text:
                 response_text = "I'm here. How can I help you?"
             
+            # Save assistant response
+            tool_calls_str = ", ".join(tool_calls_used) if tool_calls_used else ""
+            save_message(self.conversation_id, "assistant", response_text, tool_calls_str)
+            
             # Post-chat memory consolidation
             self._post_chat_learning(message, response_text, tool_calls_used)
             
@@ -185,10 +262,11 @@ class HermesAgent:
                 "response": response_text,
                 "model_used": self.model_name,
                 "tool_calls": str(tool_calls_used)[:200] if tool_calls_used else [],
+                "conversation_id": self.conversation_id,
             }
             
         except Exception as e:
-            logger.error(f"Hermes chat error: {e}")
+            logger.error(f"Athena chat error: {e}")
             return {
                 "response": f"I encountered an error: {str(e)[:200]}. Let me try a simpler approach.",
                 "model_used": self.model_name,
@@ -232,15 +310,17 @@ class HermesAgent:
             consolidate_memory()
     
     def get_state(self) -> dict:
-        """Get Hermes internal state for the dashboard overview."""
-        from .memory import get_skills, profile_summary
+        """Get Athena internal state for the dashboard overview."""
+        from .memory import get_skills, profile_summary, get_conversation_messages
         
         skills = get_skills()
         profile_info = profile_summary()
+        recent_messages = get_conversation_messages(self.conversation_id, limit=10)
         
         return {
             "agent_id": self.agent_id,
             "session_id": self.session_id,
+            "conversation_id": self.conversation_id,
             "model": self.model_name,
             "conversations": self.conversation_count,
             "skills_count": len(skills),
@@ -249,23 +329,33 @@ class HermesAgent:
             "user_name": self.user_name,
             "status": "active",
             "tools_available": len(TOOL_DEFINITIONS),
+            "conversation_history": [
+                {"role": m["role"], "content": m["content"][:200]}
+                for m in recent_messages
+            ],
         }
+    
+    def new_conversation(self) -> str:
+        """Start a fresh conversation thread. Returns the new conversation ID."""
+        from .memory import reset_conversation as reset_conv_db
+        self.conversation_id = reset_conv_db()
+        return self.conversation_id
 
 
 # ─── Singleton ──────────────────────────────────────────────────────────────
 
-_instance: Optional[HermesAgent] = None
+_instance: Optional[AthenaAgent] = None
 
-def get_hermes(db_engine=None) -> HermesAgent:
-    """Get or create the singleton Hermes agent instance."""
+def get_athena(db_engine=None) -> AthenaAgent:
+    """Get or create the singleton Athena agent instance."""
     global _instance
     if _instance is None:
-        model = os.environ.get("HERMES_MODEL", "unsloth/Llama-3.2-3B-Instruct")
-        _instance = HermesAgent(db_engine=db_engine, model_name=model)
+        model = os.environ.get("ATHENA_MODEL", "hy3-free")
+        _instance = AthenaAgent(db_engine=db_engine, model_name=model)
     return _instance
 
 
-def reset_hermes():
+def reset_athena():
     """Reset the singleton (for testing or model change)."""
     global _instance
     _instance = None

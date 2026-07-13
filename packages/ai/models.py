@@ -1,18 +1,17 @@
 """
-RealtyAI — Model Gateway with Gentle Cascading Fallback.
+RealtyAI — Model Gateway with 4-Tier Cascading Fallback.
 
-Primary:  9router tunnel proxy (ocg/kimi-k2.6 — fast, low-cost)
-Fallback 1: Featherless.ai (Qwen3-4B-Instruct)
-Fallback 2: NVIDIA API (Llama-3.1-8B-Instruct)
+Tier 0 (primary):  OpenCode Zen (free tier, via opencode.ai)
+Tier 1:             9router tunnel proxy (ocg/ models via cloudflared)
+Tier 2:             Featherless.ai (paid, fast)
+Tier 3:             NVIDIA API (last resort)
 
 Each level falls through ONLY on total failure (timeout, auth, down).
 Rate limits and concurrency caps do NOT trigger fallback — they retry.
 """
 import os
 import logging
-import time
 from typing import Optional
-from datetime import datetime, timedelta
 
 from langchain_openai import ChatOpenAI
 import httpx
@@ -25,113 +24,102 @@ logger = logging.getLogger(__name__)
 def _env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
-# Tier 1: 9router tunnel (primary)
-def get_tunnel_base() -> str:
-    return _env("LLM_API_BASE", "https://r9tgp4c.abc-tunnel.us/v1")
 
-def get_tunnel_key() -> str:
-    return _env("LLM_API_KEY", "")
+# Tier configs — populated at call time from env vars
+TIERS = [
+    {  # 0: OpenCode Zen
+        "base": lambda: _env("LLM_API_BASE", "https://opencode.ai/zen/v1"),
+        "key":  lambda: _env("LLM_API_KEY", ""),
+        "model": lambda: _env("LLM_DEFAULT_MODEL", "hy3-free"),
+    },
+    {  # 1: 9router tunnel
+        "base": lambda: _env("LLM_FALLBACK_API_BASE", ""),
+        "key":  lambda: _env("LLM_FALLBACK_API_KEY", ""),
+        "model": lambda: _env("LLM_FALLBACK_MODEL", "ocg/kimi-k2.6"),
+    },
+    {  # 2: Featherless
+        "base": lambda: _env("LLM_FALLBACK2_API_BASE", "https://api.featherless.ai/v1"),
+        "key":  lambda: _env("LLM_FALLBACK2_API_KEY", ""),
+        "model": lambda: _env("LLM_FALLBACK2_MODEL", "Qwen/Qwen3-4B-Instruct-2507"),
+    },
+    {  # 3: NVIDIA
+        "base": lambda: _env("LLM_FALLBACK3_API_BASE", "https://integrate.api.nvidia.com/v1"),
+        "key":  lambda: _env("LLM_FALLBACK3_API_KEY", ""),
+        "model": lambda: _env("LLM_FALLBACK3_MODEL", "meta/llama-3.1-8b-instruct"),
+    },
+]
 
-# Tier 2: Featherless
-def get_featherless_base() -> str:
-    return _env("LLM_FALLBACK_API_BASE", "https://api.featherless.ai/v1")
+MAX_TIER = len(TIERS) - 1
 
-def get_featherless_key() -> str:
-    return _env("LLM_FALLBACK_API_KEY", "")
-
-# Tier 3: NVIDIA (last resort)
-def get_nvidia_base() -> str:
-    return _env("LLM_FALLBACK2_API_BASE", "https://integrate.api.nvidia.com/v1")
-
-def get_nvidia_key() -> str:
-    return _env("LLM_FALLBACK2_API_KEY", "")
-
-def get_nvidia_model() -> str:
-    return _env("LLM_FALLBACK2_MODEL", "meta/llama-3.1-8b-instruct")
-
-# Model names
+# Model name overrides
 def get_fast_model() -> str:
-    return _env("LLM_DEFAULT_MODEL", "ocg/kimi-k2.6")
+    return _env("LLM_DEFAULT_MODEL", "hy3-free")
 
 def get_premium_model() -> str:
-    return _env("LLM_PREMIUM_MODEL", "ocg/deepseek-v4-flash")
+    return _env("LLM_PREMIUM_MODEL", "hy3-free")
 
 def get_local_model() -> str:
-    return _env("LLM_LOCAL_MODEL", "ocg/mimo-v2.5-pro")
+    return _env("LLM_LOCAL_MODEL", "hy3-free")
 
 
 # ─── Tiered Fallback State ─────────────────────────────────────────────────────
 
-_fallback_level = 0  # 0=tunnel, 1=featherless, 2=nvidia
+_fallback_level = 0  # Start at tier 0
 
-def _check_provider(base_url: str, api_key: str, timeout: int = 3) -> bool:
-    """Check if a provider is reachable."""
-    if not api_key:
-        return False
-    try:
-        r = httpx.get(f"{base_url.rstrip('/')}/models",
-                      headers={"Authorization": f"Bearer {api_key}"},
-                      timeout=timeout)
-        return r.status_code == 200
-    except Exception:
-        return False
+def reset_fallback():
+    """Reset fallback to tier 0 (after providers recover)."""
+    global _fallback_level
+    _fallback_level = 0
 
 
 # ─── Model Factory with Gentle Fallback ────────────────────────────────────────
 
 def get_model(model_name: Optional[str] = None) -> ChatOpenAI:
-    """Get ChatOpenAI with cascading fallback. Each tier is tried silently.
+    """Get ChatOpenAI with cascading fallback across all configured tiers.
     
-    - Tier 1: 9router tunnel (primary)
-    - Tier 2: Featherless (if tunnel unreachable)
-    - Tier 3: NVIDIA (last resort, rarely used)
-    
-    Does NOT fallback on rate limits, concurrency, or model-specific errors.
-    Only falls through on complete provider failure (auth, DNS, timeout).
+    Tries tiers starting from `_fallback_level`. Falls through on total
+    provider failure only. Returns the best available model.
     """
     global _fallback_level
-    
+
     model = model_name or get_fast_model()
-    
-    # Try each tier in order, starting from current level
-    for level in range(_fallback_level, 3):
-        if level == 0:
-            base, key = get_tunnel_base(), get_tunnel_key()
-        elif level == 1:
-            base, key = get_featherless_base(), get_featherless_key()
-        else:
-            base, key = get_nvidia_base(), get_nvidia_key()
-            model = get_nvidia_model()
-        
-        if not key:
+
+    for level in range(_fallback_level, MAX_TIER + 1):
+        tier = TIERS[level]
+        base = tier["base"]()
+        key = tier["key"]()
+        m = tier["model"]() if level > 0 else model  # Use original model for tier 0
+
+        if not base or not key:
+            _fallback_level = min(level + 1, MAX_TIER)
             continue
-        
-        # Quick health check — skip if dead
+
+        # Quick health check — skip if completely dead
         try:
             r = httpx.get(f"{base.rstrip('/')}/models",
                          headers={"Authorization": f"Bearer {key}"},
                          timeout=2)
             if r.status_code != 200:
-                _fallback_level = min(level + 1, 2)
+                _fallback_level = min(level + 1, MAX_TIER)
                 continue
         except Exception:
-            _fallback_level = min(level + 1, 2)
+            _fallback_level = min(level + 1, MAX_TIER)
             continue
-        
-        # Provider is alive — use it
-        _fallback_level = level  # Reset to this working tier
+
+        # Provider is alive — use it and remember this tier
+        _fallback_level = level
         return ChatOpenAI(
-            model=model,
+            model=m,
             base_url=base,
             api_key=key,
             temperature=0.2,
         )
-    
-    # All providers failed — return tunnel anyway (will get a clear error)
+
+    # All providers failed — return tier 0 anyway (will get a clear error)
     return ChatOpenAI(
         model=model,
-        base_url=get_tunnel_base(),
-        api_key=get_tunnel_key(),
+        base_url=TIERS[0]["base"](),
+        api_key=TIERS[0]["key"](),
         temperature=0.2,
     )
 
@@ -139,76 +127,23 @@ def get_model(model_name: Optional[str] = None) -> ChatOpenAI:
 # ─── Direct Provider Access ────────────────────────────────────────────────────
 
 def get_primary_model(model_name: Optional[str] = None) -> ChatOpenAI:
-    """Tunnel only (no fallback)."""
+    """Tier 0 only (no fallback)."""
+    tier = TIERS[0]
     return ChatOpenAI(
         model=model_name or get_fast_model(),
-        base_url=get_tunnel_base(),
-        api_key=get_tunnel_key(),
+        base_url=tier["base"](),
+        api_key=tier["key"](),
         temperature=0.2,
     )
+
 
 def get_fallback_model() -> ChatOpenAI:
-    """NVIDIA only."""
+    """NVIDIA only (last tier, no fallback)."""
+    tier = TIERS[MAX_TIER]
     return ChatOpenAI(
-        model=get_nvidia_model(),
-        base_url=get_nvidia_base(),
-        api_key=get_nvidia_key(),
-        temperature=0.2,
-    )
-
-
-# ─── Health Check ──────────────────────────────────────────────────────────────
-
-def is_proxy_available() -> bool:
-    """Check if the 9router tunnel is reachable."""
-    try:
-        r = httpx.get(f"{get_tunnel_base()}/models",
-                      headers={"Authorization": f"Bearer {get_tunnel_key()}"},
-                      timeout=5)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-
-def list_available_models() -> list[str]:
-    """Fetch available models from the tunnel."""
-    try:
-        r = httpx.get(f"{get_tunnel_base()}/models",
-                      headers={"Authorization": f"Bearer {get_tunnel_key()}"},
-                      timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            return [m["id"] for m in data.get("data", [])]
-        return []
-    except Exception:
-        return []
-
-    # Use Featherless primary
-    return ChatOpenAI(
-        model=model_name or get_fast_model(),
-        base_url=get_featherless_base(),
-        api_key=get_featherless_key(),
-        temperature=0.2,
-    )
-
-
-# ─── Direct Provider Access (for agent.py to handle fallback in LangGraph) ────
-
-def get_primary_model(model_name: Optional[str] = None) -> ChatOpenAI:
-    """Featherless only (no fallback)."""
-    return ChatOpenAI(
-        model=model_name or get_fast_model(),
-        base_url=get_featherless_base(),
-        api_key=get_featherless_key(),
-        temperature=0.2,
-    )
-
-def get_fallback_model() -> ChatOpenAI:
-    """NVIDIA only."""
-    return ChatOpenAI(
-        model=get_nvidia_model(),
-        base_url=get_nvidia_base(),
-        api_key=get_nvidia_key(),
+        model=tier["model"](),
+        base_url=tier["base"](),
+        api_key=tier["key"](),
         temperature=0.2,
     )
 
@@ -216,11 +151,12 @@ def get_fallback_model() -> ChatOpenAI:
 # ─── Health Checks ─────────────────────────────────────────────────────────────
 
 def is_proxy_available() -> bool:
-    """Check if primary API (Featherless) is reachable."""
+    """Check if tier 0 (primary API) is reachable."""
+    tier = TIERS[0]
     try:
         r = httpx.get(
-            f"{get_featherless_base()}/models",
-            headers={"Authorization": f"Bearer {get_featherless_key()}"},
+            f"{tier['base']()}/models",
+            headers={"Authorization": f"Bearer {tier['key']()}"},
             timeout=5,
         )
         return r.status_code == 200
@@ -229,11 +165,12 @@ def is_proxy_available() -> bool:
 
 
 def list_available_models() -> list[str]:
-    """Fetch available models from Featherless."""
+    """Fetch available models from tier 0."""
+    tier = TIERS[0]
     try:
         r = httpx.get(
-            f"{get_featherless_base()}/models",
-            headers={"Authorization": f"Bearer {get_featherless_key()}"},
+            f"{tier['base']()}/models",
+            headers={"Authorization": f"Bearer {tier['key']()}"},
             timeout=10,
         )
         if r.status_code == 200:

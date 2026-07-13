@@ -41,10 +41,10 @@ from agents.supervisor import route, AGENT_REGISTRY, classify_intent
 from activity import get_recent_activities, get_activity_stats, record_activity
 from approval import get_pending_approvals, approve as approve_action, reject as reject_action
 
-# ─── Hermes Agent ────────────────────────────────────────────────────────────
-from hermes.agent import get_hermes
+# ─── Athena Agent ──────────────────────────────────────────────────────────────
+from hermes.agent import get_athena
 from hermes.tools import TOOL_DEFINITIONS
-from hermes.memory import profile_summary, recall, save_note, search_notes, get_skills, search_conversations as search_memory_conversations
+from hermes.memory import profile_summary, recall, save_note, search_notes, get_skills, search_conversations as search_memory_conversations, get_conversation_messages as get_mem_conversation_messages, list_conversations as list_mem_conversations
 
 from .config import settings
 from .api.router import api_router
@@ -305,41 +305,41 @@ async def reject(approval_id: str, body: ApprovalAction):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# HERMES AGENT ENDPOINTS
+# ATHENA AGENT ENDPOINTS
 # ═══════════════════════════════════════════════════════════════════════════
 
-hermes_agent = None  # Lazy init on first request
+athena_agent = None  # Lazy init on first request
 
-def _get_hermes():
-    global hermes_agent
-    if hermes_agent is None:
+def _get_athena():
+    global athena_agent
+    if athena_agent is None:
         from sqlalchemy import create_engine
         from sqlalchemy.orm import Session
         from .config import settings
         db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
         engine = create_engine(db_url) if db_url else None
-        hermes_agent = get_hermes(db_engine=engine)
-    return hermes_agent
+        athena_agent = get_athena(db_engine=engine)
+    return athena_agent
 
 
-@app.post("/api/v1/hermes/chat")
-async def hermes_chat(query: AIQuery):
-    """Chat with the Hermes persistent agent. Controls the entire system via NL."""
-    agent = _get_hermes()
+@app.post("/api/v1/athena/chat")
+async def athena_chat(query: AIQuery):
+    """Chat with Athena — your digital secretary. She controls the entire system via natural language."""
+    agent = _get_athena()
     result = agent.chat(query.message)
     return result
 
 
-@app.get("/api/v1/hermes/state")
-async def hermes_state():
-    """Get Hermes agent internal state — skills, memory, profile."""
-    agent = _get_hermes()
+@app.get("/api/v1/athena/state")
+async def athena_state():
+    """Get Athena agent internal state — skills, memory, profile."""
+    agent = _get_athena()
     return {"agent": agent.get_state(), "tools": TOOL_DEFINITIONS}
 
 
-@app.get("/api/v1/hermes/memory")
-async def hermes_memory(query: str = ""):
-    """Search Hermes memory (facts, conversations, notes)."""
+@app.get("/api/v1/athena/memory")
+async def athena_memory(query: str = ""):
+    """Search Athena's memory (facts, conversations, notes)."""
     if not query:
         return {"profile": profile_summary(), "skills": get_skills()}
     facts = recall(query)
@@ -348,8 +348,8 @@ async def hermes_memory(query: str = ""):
     return {"facts": facts, "conversations": convs, "notes": notes}
 
 
-@app.get("/api/v1/hermes/system-overview")
-async def hermes_system_overview():
+@app.get("/api/v1/athena/system-overview")
+async def athena_system_overview():
     """Full system overview — all counts, health, agent state."""
     try:
         from sqlalchemy import create_engine
@@ -395,3 +395,34 @@ async def hermes_system_overview():
             ] if 'AGENT_REGISTRY' in dir() else [],
         }
     }
+
+
+# ─── Persistent Conversation Endpoints ────────────────────────────────────
+
+@app.get("/api/v1/athena/conversations")
+async def list_athena_conversations():
+    """List all past conversation threads."""
+    return {"conversations": list_mem_conversations()}
+
+
+@app.get("/api/v1/athena/conversations/current")
+async def get_current_conversation():
+    """Get active conversation with its messages."""
+    agent = _get_athena()
+    messages = get_mem_conversation_messages(agent.conversation_id)
+    return {"conversation_id": agent.conversation_id, "messages": messages}
+
+
+@app.get("/api/v1/athena/conversations/{conv_id}/messages")
+async def get_conversation_messages_endpoint(conv_id: str):
+    """Get all messages for a specific conversation."""
+    messages = get_mem_conversation_messages(conv_id)
+    return {"conversation_id": conv_id, "messages": messages}
+
+
+@app.post("/api/v1/athena/conversations/new")
+async def new_conversation():
+    """Start a fresh conversation. The old one is preserved and can be reviewed later."""
+    agent = _get_athena()
+    new_id = agent.new_conversation()
+    return {"conversation_id": new_id, "message": "Fresh start. I'm ready for you."}

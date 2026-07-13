@@ -1,10 +1,7 @@
 """
-RealtyAI — Hermes Agent. The persistent AI that grows with you.
+Athena Agent — your digital secretary.
+The persistent AI that learns your style, remembers everything, and grows with you.
 
-Architecture:
-  User ↔ Chat API ↔ Hermes Orchestrator ↔ Tools ↔ RealtyAI System
-                              ↕
-                       Memory System (learns user)
-                              ↕
-                       Skill System (creates/improves)
+Flow:
+  User ↔ Chat API ↔ Athena Orchestrator ↔ Tools ↔ RealtyAI System
 """

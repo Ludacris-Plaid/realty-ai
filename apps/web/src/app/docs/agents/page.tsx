@@ -13,7 +13,7 @@ const agents = [
   {
     name: "ListingOptimizer",
     icon: Building2,
-    color: "bg-purple-50 text-purple-600",
+    color: "bg-amber-50 text-amber-600",
     desc: "Generates MLS descriptions, feature highlights, and virtual-staging suggestions. Tailors language to property type — residential, commercial, or luxury — and local market trends.",
     model: "Premium (Claude 3.5 Sonnet)",
   },
@@ -78,7 +78,7 @@ export default function AgentsDocs() {
             <div className="text-sm text-gray-600 space-y-1.5 font-mono">
               <p className="flex items-center gap-2"><Zap className="h-3.5 w-3.5 text-amber-500" /> Request → SupervisorAgent (intent classifier)</p>
               <p className="pl-5">├─ &ldquo;Lead &gt; 85&rdquo; → <span className="text-emerald-600">LeadQualifier</span></p>
-              <p className="pl-5">├─ &ldquo;Write MLS &rdquo; → <span className="text-purple-600">ListingOptimizer</span></p>
+              <p className="pl-5">├─ &ldquo;Write MLS &rdquo; → <span className="text-amber-600">ListingOptimizer</span></p>
               <p className="pl-5">├─ &ldquot;Find in contract&rdquo; → <span className="text-rose-600">DocAnalyzer</span></p>
               <p className="pl-5">├─ &ldquo;Schedule showing&rdquo; → <span className="text-amber-600">SchedulerAgent</span></p>
               <p className="pl-5">├─ &ldquo;Create campaign&rdquo; → <span className="text-cyan-600">CampaignEngine</span></p>

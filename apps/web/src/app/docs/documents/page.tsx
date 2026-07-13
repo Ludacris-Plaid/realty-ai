@@ -6,7 +6,7 @@ const docCategories = [
   { name: "Contracts", icon: FileSignature, count: "Purchase agreements, counter-offers, addenda", color: "bg-blue-50 text-blue-600" },
   { name: "Disclosures", icon: FileCheck, count: "Seller disclosures, lead-based paint, property condition", color: "bg-rose-50 text-rose-600" },
   { name: "Inspections", icon: Wrench, count: "Home inspection, termite, roof, HVAC reports", color: "bg-amber-50 text-amber-600" },
-  { name: "Appraisals", icon: Scale, count: "Appraisal reports, valuation analyses, reconsideration letters", color: "bg-purple-50 text-purple-600" },
+  { name: "Appraisals", icon: Scale, count: "Appraisal reports, valuation analyses, reconsideration letters", color: "bg-amber-50 text-amber-600" },
   { name: "Title Documents", icon: FileSearch, count: "Title commitments, policies, lien searches", color: "bg-emerald-50 text-emerald-600" },
   { name: "Closing Documents", icon: Home, count: "Closing disclosures, settlement statements, deeds", color: "bg-cyan-50 text-cyan-600" },
 ];

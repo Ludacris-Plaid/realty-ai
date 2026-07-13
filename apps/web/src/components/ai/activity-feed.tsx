@@ -15,7 +15,7 @@ const agentIcons: Record<string, React.ElementType> = {
 };
 
 const agentColors: Record<string, string> = {
-  lead: "bg-violet-100 text-violet-700",
+  lead: "bg-amber-100 text-amber-700",
   listing: "bg-cyan-100 text-cyan-700",
   document: "bg-amber-100 text-amber-700",
   chatbot: "bg-brand-100 text-brand-700",

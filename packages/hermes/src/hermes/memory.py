@@ -1,11 +1,10 @@
 """
-Hermes Agent — Persistent Memory System.
+Athena Agent — Persistent Memory System.
 
-Functions like Obsidian for the agent:
+Functions like a personal notebook for your digital secretary.
 - Stores user facts (preferences, style, clients, history)
 - FTS5 full-text search on past conversations
-- Vector embeddings for semantic recall
-- Periodic memory consolidation (agent-curated)
+- Periodic memory consolidation
 - User profile grows across sessions
 """
 import json
@@ -15,10 +14,9 @@ import hashlib
 from datetime import datetime
 from typing import Optional
 
-MEMORY_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "hermes")
+MEMORY_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "athena")
 os.makedirs(MEMORY_DIR, exist_ok=True)
-
-DB_PATH = os.path.join(MEMORY_DIR, "hermes_memory.db")
+DB_PATH = os.path.join(MEMORY_DIR, "athena_memory.db")
 NOTES_DIR = os.path.join(MEMORY_DIR, "notes")
 os.makedirs(NOTES_DIR, exist_ok=True)
 
@@ -45,6 +43,25 @@ def _ensure_schema(conn: sqlite3.Connection):
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_fact_key ON user_facts(key);
         
+        CREATE TABLE IF NOT EXISTS conversation_threads (
+            id TEXT PRIMARY KEY,
+            title TEXT DEFAULT '',
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            conversation_id TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user','assistant')),
+            content TEXT NOT NULL,
+            tool_calls TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (conversation_id) REFERENCES conversation_threads(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_messages_conv ON chat_messages(conversation_id, created_at);
+        
         CREATE TABLE IF NOT EXISTS conversations (
             id TEXT PRIMARY KEY,
             title TEXT,
@@ -66,7 +83,7 @@ def _ensure_schema(conn: sqlite3.Connection):
             name TEXT UNIQUE NOT NULL,
             description TEXT,
             trigger_phrase TEXT,
-            steps TEXT,  -- JSON array of step descriptions
+            steps TEXT,
             usage_count INTEGER DEFAULT 0,
             success_rate REAL DEFAULT 1.0,
             created_at TEXT DEFAULT (datetime('now')),
@@ -77,8 +94,8 @@ def _ensure_schema(conn: sqlite3.Connection):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
             body TEXT NOT NULL,
-            tags TEXT DEFAULT '[]',  -- JSON array
-            source TEXT DEFAULT 'agent',  -- 'agent' | 'user' | 'inference'
+            tags TEXT DEFAULT '[]',
+            source TEXT DEFAULT 'agent',
             created_at TEXT DEFAULT (datetime('now'))
         );
     """)
@@ -291,3 +308,99 @@ def consolidate():
         "total_facts": fact_count,
         "top_topics": [{"topic": t[0], "count": t[1]} for t in topics],
     }
+
+
+# ─── Persistent Conversation Threads ──────────────────────────────────────
+
+def get_or_create_active_conversation() -> str:
+    """Get the active conversation ID, or create one if none exists."""
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT id FROM conversation_threads WHERE is_active = 1 ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    if row:
+        conn.close()
+        return row[0]
+    # Create a new conversation
+    import uuid
+    conv_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO conversation_threads (id, title, is_active) VALUES (?, ?, 1)",
+        (conv_id, "Chat")
+    )
+    conn.commit()
+    conn.close()
+    return conv_id
+
+
+def save_message(conversation_id: str, role: str, content: str, tool_calls: str = ""):
+    """Save a single chat message to the conversation thread."""
+    conn = _get_db()
+    conn.execute(
+        "INSERT INTO chat_messages (conversation_id, role, content, tool_calls) VALUES (?, ?, ?, ?)",
+        (conversation_id, role, content, tool_calls)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_conversation_messages(conversation_id: str, limit: int = 200) -> list[dict]:
+    """Get all messages for a conversation, ordered by time."""
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT role, content, tool_calls, created_at FROM chat_messages "
+        "WHERE conversation_id = ? ORDER BY created_at ASC LIMIT ?",
+        (conversation_id, limit)
+    ).fetchall()
+    conn.close()
+    return [
+        {"role": r[0], "content": r[1], "tool_calls": r[2], "timestamp": r[3]}
+        for r in rows
+    ]
+
+
+def list_conversations(limit: int = 50) -> list[dict]:
+    """List all conversation threads, newest first."""
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT ct.id, ct.title, ct.is_active, ct.created_at, "
+        "  (SELECT COUNT(*) FROM chat_messages WHERE conversation_id = ct.id) as msg_count, "
+        "  (SELECT content FROM chat_messages WHERE conversation_id = ct.id ORDER BY created_at DESC LIMIT 1) as last_msg "
+        "FROM conversation_threads ct ORDER BY ct.created_at DESC LIMIT ?",
+        (limit,)
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "id": r[0], "title": r[1], "is_active": bool(r[2]),
+            "created_at": r[3], "message_count": r[4],
+            "last_message": (r[5] or "")[:120]
+        }
+        for r in rows
+    ]
+
+
+def update_conversation_title(conversation_id: str, title: str):
+    """Update the title of a conversation thread."""
+    conn = _get_db()
+    conn.execute(
+        "UPDATE conversation_threads SET title = ?, updated_at = datetime('now') WHERE id = ?",
+        (title, conversation_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def reset_conversation() -> str:
+    """Mark active conversation inactive and create a fresh one. Returns new ID."""
+    conn = _get_db()
+    conn.execute("UPDATE conversation_threads SET is_active = 0 WHERE is_active = 1")
+    import uuid
+    conv_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO conversation_threads (id, title, is_active) VALUES (?, ?, 1)",
+        (conv_id, "Chat")
+    )
+    conn.commit()
+    conn.close()
+    return conv_id

@@ -5,7 +5,7 @@ import { Calendar, Clock, Bell, CalendarDays, CalendarRange, List, Home, DoorOpe
 const eventTypes = [
   { name: "Showing", icon: DoorOpen, color: "bg-blue-50 text-blue-600 border-blue-100", desc: "Property showing with a client or buyer agent. Includes arrival instructions and lockbox code." },
   { name: "Open House", icon: Home, color: "bg-emerald-50 text-emerald-600 border-emerald-100", desc: "Public open house event. Can be scheduled with or without registration requirement." },
-  { name: "Client Meeting", icon: Users, color: "bg-purple-50 text-purple-600 border-purple-100", desc: "Consultation, strategy session, or check-in with a client. Linked to the lead record." },
+  { name: "Client Meeting", icon: Users, color: "bg-amber-50 text-amber-600 border-amber-100", desc: "Consultation, strategy session, or check-in with a client. Linked to the lead record." },
   { name: "Closing", icon: Handshake, color: "bg-amber-50 text-amber-600 border-amber-100", desc: "Scheduled closing appointment at title company or attorney&rsquo;s office." },
   { name: "Inspection", icon: Wrench, color: "bg-rose-50 text-rose-600 border-rose-100", desc: "Home inspection, termite inspection, or other property evaluation appointment." },
 ];

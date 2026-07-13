@@ -1,7 +1,7 @@
 """
-Hermes Agent — RealtyAI System Tools.
+Athena Agent — RealtyAI System Tools.
 
-These tools give Hermes complete control over the RealtyAI system.
+These tools give Athena complete control over the RealtyAI system.
 All controllable via natural language through the chat interface.
 """
 import os
@@ -12,7 +12,7 @@ from sqlalchemy import text, create_engine
 from sqlalchemy.orm import Session
 
 # ─── Database access helper ────────────────────────────────────────────────
-# Engine is set by hermes_service.py on init
+# Engine is set by the API on init
 _engine = None
 
 def set_engine(engine):
