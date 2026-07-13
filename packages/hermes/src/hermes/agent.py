@@ -227,6 +227,76 @@ class AthenaAgent:
             max_tokens=4096,
         )
     
+    def _parse_xml_tool_calls(self, text: str) -> tuple[str, list[dict]]:
+        """Parse hy3-free's homemade XML tool-call syntax from response text.
+        
+        hy3-free doesn't support OpenAI function calling. It embeds tool calls
+        as XML in the response like:
+          <tool_call:6124c78e>tool_name</arg_value:6124c78e>
+          <arg_key:6124c78e>key</arg_key:6124c78e>
+          <arg_value:6124c78e>{"json":"value"}</arg_value:6124c78e>
+        
+        The closing </arg_value:6124c78e> also closes the opening <tool_call:6124c78e>.
+        Args appear after the tool_call block as sibling <arg_key>/<arg_value> pairs.
+        
+        Returns: (cleaned_text, list_of_tool_call_dicts)
+        """
+        import re as _re
+        
+        if '<tool_call' not in text and '<tool_calls' not in text:
+            return text, []
+        
+        tool_calls = []
+        cleaned = text
+        
+        # Remove <tool_calls:...>...</tool_calls:...> plural blocks (carry content as raw tool name)
+        cleaned = _re.sub(r'<tool_calls:\w+>.*?</tool_calls:\w+>', '', cleaned, flags=_re.DOTALL)
+        
+        # Extract <tool_call:...>name</arg_value:...>  (note: closing tag is arg_value, not tool_call)
+        tc_pattern = _re.compile(r'<tool_call:(\w+)>(.*?)</arg_value:\1>', _re.DOTALL)
+        for m in tc_pattern.finditer(text):
+            tool_name = m.group(2).strip()
+            if tool_name:
+                tool_calls.append({"name": tool_name, "args": {}})
+        
+        # Extract arg_key/arg_value pairs (sibling tags after tool_call)
+        ak_pattern = _re.compile(r'<arg_key:\w+>(.*?)</arg_key:\w+>', _re.DOTALL)
+        av_pattern = _re.compile(r'<arg_value:\w+>(.*?)</arg_value:\w+>', _re.DOTALL)
+        
+        ak_matches = list(ak_pattern.finditer(text))
+        av_matches = list(av_pattern.finditer(text))
+        
+        # If we have args, pair them up and attach to the last tool call
+        if ak_matches and av_matches and tool_calls:
+            args = {}
+            for km, vm in zip(ak_matches, av_matches):
+                key = km.group(1).strip()
+                val = vm.group(1).strip()
+                # Try JSON parse, fallback to string
+                try:
+                    import json
+                    parsed = json.loads(val)
+                    # If parsed is a dict, use it as the entire args
+                    if isinstance(parsed, dict) and key == 'kwargs':
+                        args = parsed
+                    else:
+                        args[key] = parsed
+                except (json.JSONDecodeError, ValueError):
+                    args[key] = val
+            # Attach args to the last tool call
+            if args:
+                tool_calls[-1]['args'] = args
+        
+        # Clean XML tags from response text
+        cleaned = _re.sub(r'<tool_call:\w+>.*?</arg_value:\w+>', '', cleaned, flags=_re.DOTALL)
+        cleaned = _re.sub(r'<arg_key:\w+>.*?</arg_key:\w+>', '', cleaned, flags=_re.DOTALL)
+        cleaned = _re.sub(r'<arg_value:\w+>.*?</arg_value:\w+>', '', cleaned, flags=_re.DOTALL)
+        cleaned = _re.sub(r'<tool_calls?:\w+\s*/>', '', cleaned)
+        cleaned = _re.sub(r'\n{3,}', '\n\n', cleaned)
+        cleaned = cleaned.strip()
+        
+        return cleaned, tool_calls
+
     def chat(self, message: str) -> dict:
         """Send a message to Athena and get a response. Persists conversation history."""
         profile = sqlite_profile_summary()
@@ -290,24 +360,45 @@ class AthenaAgent:
             elif hasattr(response, 'response_metadata') and response.response_metadata:
                 response_text = str(response.response_metadata.get('message', {}).get('content', ''))
             
-            # Execute any tool calls requested by the model
+            # Execute tool calls — two formats:
+            # 1. Structured function calls (OpenAI-compatible models → response.tool_calls)
+            # 2. XML tool calls in response text (hy3-free → <tool_call:...> syntax)
+            xml_tool_calls = []
             if hasattr(response, 'tool_calls') and response.tool_calls:
+                # Format 1: Proper OpenAI function calling
                 for tc in response.tool_calls:
-                    tool_name = tc.get('name', '')
-                    tool_args = tc.get('args', {})
-                    if not tool_name:
-                        continue
-                    tool_calls_used.append(tool_name)
-                    try:
-                        result = execute_tool(tool_name, tool_args)
-                        messages.append(SystemMessage(content=f"Tool '{tool_name}' result:\n{result[:1500]}"))
-                    except Exception as e:
-                        messages.append(SystemMessage(content=f"Tool '{tool_name}' error: {str(e)[:200]}"))
-                
-                # Second LLM call with tool results
-                response = self.llm.invoke(messages)
-                if hasattr(response, 'content') and response.content:
-                    response_text = response.content
+                    tc_name = tc.get('name', '')
+                    tc_args = tc.get('args', {})
+                    if tc_name:
+                        xml_tool_calls.append({"name": tc_name, "args": tc_args})
+            else:
+                # Format 2: hy3-free embeds XML tool calls in response text
+                cleaned, parsed = self._parse_xml_tool_calls(response_text)
+                if parsed:
+                    response_text = cleaned  # Strip XML from conversational response
+                    xml_tool_calls = parsed
+            
+            # Execute all detected tool calls
+            for tc in xml_tool_calls:
+                tool_name = tc.get('name', '')
+                tool_args = tc.get('args', {})
+                if not tool_name:
+                    continue
+                tool_calls_used.append(tool_name)
+                try:
+                    result = execute_tool(tool_name, tool_args)
+                    messages.append(SystemMessage(content=f"Tool '{tool_name}' result:\n{result[:1500]}"))
+                except Exception as e:
+                    messages.append(SystemMessage(content=f"Tool '{tool_name}' error: {str(e)[:200]}"))
+            
+            # If tools were called, get the final response with tool results
+            if tool_calls_used:
+                try:
+                    response = self.llm.invoke(messages)
+                    if hasattr(response, 'content') and response.content:
+                        response_text = response.content
+                except Exception:
+                    pass  # Keep original response_text if second LLM call fails
             
             if not response_text:
                 response_text = "I'm here. How can I help you?"
