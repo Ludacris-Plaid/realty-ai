@@ -128,6 +128,29 @@
 
 **Deliverable**: Agents interact with Athena more than any human colleague because she's always available.
 
+### Phase 5.5: CRM Integrations 🔗 *(3 weeks, parallel with Voice)*
+
+**Goal**: Athena syncs bidirectionally with the CRMs agents already live in.
+
+| Step | Task | Details |
+|------|------|---------|
+| 5.5.1 | Adapter layer | Abstract `CRMAdapter` base class — `push_lead()`, `pull_leads()`, `push_note()`, `sync_status()`. Each CRM is a plugin. |
+| 5.5.2 | Field mapping engine | Flexible JSON field map per CRM. "deal" → "lead", "opportunity_stage" → "status". UI to customize per brokerage. |
+| 5.5.3 | Conflict resolution | Last-write-wins by default, configurable per field. Athena as source-of-truth for AI score; CRM as source-of-truth for contact details. |
+| 5.5.4 | Follow Up Boss | Highest-priority: dominant in residential RE. Two-way lead + note sync via FUB REST API. |
+| 5.5.5 | HubSpot | Contacts + deals sync. Webhook listener for real-time CRM → Athena updates. |
+| 5.5.6 | Salesforce | Enterprise tier only. Bulk API for initial import, Streaming API for real-time. |
+| 5.5.7 | kvCORE / Lofty | Common in team/brokerage setups. Lead import + status pushback. |
+| 5.5.8 | Webhook inbound | Generic inbound webhook endpoint — any CRM can POST lead events to Athena. |
+| 5.5.9 | Sync dashboard | UI showing last sync time, conflict log, field mapping editor, enable/disable per integration. |
+
+**Key design decisions (captured from product review):**
+- Two-way sync is the baseline — not just pull-in, push status/notes back so nothing drifts
+- Field mapping is per-brokerage configurable, not hardcoded
+- Conflict resolution policy decided at schema design time: AI score owned by Athena, contact data owned by CRM, timestamps break ties
+
+**Deliverable**: An agent's existing CRM stays in sync automatically. Athena becomes the AI brain on top of whatever CRM they already paid for.
+
 ### Phase 6: Continuous Learning 🧠 *(Ongoing)*
 
 **Goal**: Athena gets better every day without engineering intervention.
