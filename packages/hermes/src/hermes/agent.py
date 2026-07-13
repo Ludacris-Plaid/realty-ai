@@ -69,11 +69,9 @@ def _sanitize_response(text: str) -> str:
     if not text:
         return text
     
-    # Strip <tool_calls:...>...</tool_calls:...> blocks
-    text = re.sub(r'<tool_calls?:\w+>[^<]*</tool_calls?:\w+>', '', text)
-    
-    # Strip <tool_call:...>...</tool_call:...> blocks
-    text = re.sub(r'<tool_call[^>]*>.*?</tool_call>', '', text, flags=re.DOTALL)
+    # Strip <tool_calls:...>...</tool_calls:...>, <tool_call:...></arg_value:...> etc
+    text = re.sub(r'<tool_calls?:\w+>.*?</(?:arg_value|tool_call|tool_calls):\w+>', '', text, flags=re.DOTALL)
+    text = re.sub(r'<tool_calls?:\w+>.*?</tool_calls?:\w+>', '', text, flags=re.DOTALL)
     
     # Strip <function_calls>...</function_calls> blocks
     text = re.sub(r'<function_calls>.*?</function_calls>', '', text, flags=re.DOTALL)
@@ -249,11 +247,12 @@ class AthenaAgent:
         tool_calls = []
         cleaned = text
         
-        # Remove <tool_calls:...>...</tool_calls:...> plural blocks (carry content as raw tool name)
-        cleaned = _re.sub(r'<tool_calls:\w+>.*?</tool_calls:\w+>', '', cleaned, flags=_re.DOTALL)
+        # Remove <tool_calls:...>...</tool_calls:...> and <tool_call:...>...</tool_call:...> blocks
+        cleaned = _re.sub(r'<tool_calls?:\w+>.*?</tool_calls?:\w+>', '', cleaned, flags=_re.DOTALL)
         
-        # Extract <tool_call:...>name</arg_value:...>  (note: closing tag is arg_value, not tool_call)
-        tc_pattern = _re.compile(r'<tool_call:(\w+)>(.*?)</arg_value:\1>', _re.DOTALL)
+        # Extract tool name from <tool_call:id>name</...> where closing can be:
+        #   </arg_value:id> or </tool_call:id> or </tool_calls:id>
+        tc_pattern = _re.compile(r'<tool_call:(\w+)>(.*?)</(?:arg_value|tool_call|tool_calls):\1>', _re.DOTALL)
         for m in tc_pattern.finditer(text):
             tool_name = m.group(2).strip()
             if tool_name:

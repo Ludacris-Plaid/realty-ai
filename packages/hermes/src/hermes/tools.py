@@ -103,6 +103,26 @@ TOOL_DEFINITIONS = [
         "description": "Get a complete overview of the entire RealtyAI system: all counts, stats, active processes, agent status, and system health.",
         "parameters": {}
     },
+    {
+        "name": "market_snapshot",
+        "description": "Get a market snapshot for a city: listing counts, median prices, avg price per sqft from your database.",
+        "parameters": {"city": {"type": "string", "description": "City name (optional)", "required": False}}
+    },
+    {
+        "name": "compare_neighborhoods",
+        "description": "Compare two neighborhoods using listing data from your database.",
+        "parameters": {"neighborhood_1": {"type": "string", "description": "First neighborhood name", "required": True}, "neighborhood_2": {"type": "string", "description": "Second neighborhood name", "required": True}, "city": {"type": "string", "description": "City filter (optional)", "required": False}}
+    },
+    {
+        "name": "summarize_contract",
+        "description": "Analyze a real estate contract text and return key terms, deadlines, and risks.",
+        "parameters": {"contract_text": {"type": "string", "description": "The full text of the contract or agreement", "required": True}}
+    },
+    {
+        "name": "extract_deadlines",
+        "description": "Extract all dates, deadlines, and time-sensitive clauses from a contract.",
+        "parameters": {"contract_text": {"type": "string", "description": "The contract text to analyze", "required": True}}
+    },
 ]
 
 
@@ -180,12 +200,20 @@ def execute_tool(name: str, args: dict) -> str:
         return _get_crew_info()
     elif name == "run_crew":
         return _run_crew(args.get("crew_name", ""), args.get("input_data", "{}"))
+    elif name == "market_snapshot":
+        return _market_snapshot(args.get("city", ""))
+    elif name == "compare_neighborhoods":
+        return _compare_neighborhoods(args.get("neighborhood_1", ""), args.get("neighborhood_2", ""), args.get("city", ""))
+    elif name == "summarize_contract":
+        return _summarize_contract(args.get("contract_text", ""))
+    elif name == "extract_deadlines":
+        return _extract_deadlines(args.get("contract_text", ""))
     else:
         return f"Unknown tool: {name}"
 
 
 def _query_db(sql: str, params: dict = None) -> list:
-    """Execute a SQL query and return results."""
+    """Execute a SQL query and return results (for SELECT statements)."""
     global _engine
     if _engine is None:
         db_url = os.environ.get("DATABASE_URL", "")
@@ -197,7 +225,23 @@ def _query_db(sql: str, params: dict = None) -> list:
         return [{"error": "No database connection"}]
     with Session(_engine) as session:
         result = session.execute(text(sql), params or {})
-        return [dict(r._mapping) for r in result]
+        session.commit()
+        try:
+            return [dict(r._mapping) for r in result]
+        except Exception:
+            # INSERT/UPDATE without RETURNING → no rows to map
+            return []
+
+
+def _execute_db(sql: str, params: dict = None) -> bool:
+    """Execute a SQL mutation (INSERT/UPDATE/DELETE) without returning rows."""
+    try:
+        _query_db(sql, params)
+        return True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"DB execute failed: {e}")
+        return False
 
 
 def _list_leads(status: Optional[str] = None) -> str:
@@ -336,12 +380,19 @@ def _launch_campaign(name: str, audience: str = "") -> str:
     """Create a marketing campaign record and return its details."""
     campaign_id = str(uuid.uuid4())
     audience_desc = audience or "all leads"
+    
+    ok = _execute_db(
+        "INSERT INTO campaigns (id, name, audience, status, created_at) VALUES (:id, :name, :audience, 'active', NOW())",
+        {"id": campaign_id, "name": name, "audience": audience_desc}
+    )
+    
+    lead_count = 0
     try:
-        _query_db(
-            "INSERT INTO campaigns (id, name, audience, status, created_at) VALUES (:id, :name, :audience, 'active', NOW())",
-            {"id": campaign_id, "name": name, "audience": audience_desc}
-        )
         lead_count = _query_db("SELECT COUNT(*) as c FROM leads")[0]["c"]
+    except:
+        pass
+    
+    if ok:
         return (
             f"**Campaign Launched:** {name}\n"
             f"  • ID: {campaign_id[:8]}...\n"
@@ -350,21 +401,14 @@ def _launch_campaign(name: str, audience: str = "") -> str:
             f"  • Status: Active\n\n"
             f"Use `get_dashboard_summary` to track results."
         )
-    except Exception as e:
-        # If campaigns table doesn't exist yet, at least return confirmation
-        lead_count = 0
-        try:
-            lead_count = _query_db("SELECT COUNT(*) as c FROM leads")[0]["c"]
-        except:
-            pass
-        return (
-            f"**Campaign Planned:** {name}\n"
-            f"  • Audience: {audience_desc}\n"
-            f"  • Target: {lead_count} leads\n"
-            f"  • Status: Queued (campaigns table pending migration)\n\n"
-            f"The campaign concept is saved in our conversation history. "
-            f"When the campaigns infrastructure is ready, I can execute it."
-        )
+    
+    return (
+        f"**Campaign Planned:** {name}\n"
+        f"  • Audience: {audience_desc}\n"
+        f"  • Target: {lead_count} leads\n"
+        f"  • Status: Queued\n\n"
+        f"The campaign concept is noted. When the campaigns infrastructure is ready, I can execute it."
+    )
 
 
 def _generate_listing_description(property_id: str, tone: str = "professional") -> str:
@@ -437,24 +481,20 @@ def _generate_listing_description(property_id: str, tone: str = "professional") 
 
 
 def _schedule_showing(lead_name: str, property_address: str, time: str) -> str:
-    """Schedule a property showing, recording it in the activities log."""
+    """Schedule a property showing, recording it in the DB."""
     showing_id = str(uuid.uuid4())
     
-    # Try to record in activities table
-    try:
-        _query_db(
-            "INSERT INTO activities (id, organization_id, user_id, agent_name, action, intent, status, metadata) "
-            "VALUES (:id, '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', "
-            "'Athena', :action, 'showing', 'pending', :meta)",
-            {
-                "id": showing_id,
-                "action": f"Schedule showing: {lead_name} @ {property_address} at {time}",
-                "meta": {"lead_name": lead_name, "property": property_address, "time": time},
-            }
-        )
-        status_note = "📅 Showing recorded in activity log."
-    except Exception:
-        status_note = "📅 (Activities table not yet created — showing logged in conversation.)"
+    ok = _execute_db(
+        "INSERT INTO activities (id, organization_id, user_id, agent_name, action, intent, status, metadata) "
+        "VALUES (:id, '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', "
+        "'Athena', :action, 'showing', 'pending', :meta)",
+        {
+            "id": showing_id,
+            "action": f"Schedule showing: {lead_name} @ {property_address} at {time}",
+            "meta": {"lead_name": lead_name, "property": property_address, "time": time},
+        }
+    )
+    status_note = "📅 Showing recorded in activity log." if ok else "📅 (Showing noted in conversation.)"
     
     return (
         f"**Showing Scheduled** ✅\n\n"
@@ -502,6 +542,151 @@ def _analyze_pipeline() -> str:
         result += f"  → Pipeline value at risk: ${sum((r.get('budget') or 0) for r in hot):,.0f} from hot leads\n"
     
     return result
+
+
+def _market_snapshot(city: str = "") -> str:
+    """Get market snapshot from DB listing data."""
+    try:
+        if city:
+            rows = _query_db(
+                "SELECT list_price, sqft, address_city, property_type FROM properties WHERE status = 'ACTIVE' AND LOWER(address_city) LIKE :city",
+                {"city": f"%{city.lower()}%"}
+            )
+        else:
+            rows = _query_db("SELECT list_price, sqft, address_city, property_type FROM properties WHERE status = 'ACTIVE'")
+    except Exception as e:
+        return f"Error fetching market data: {e}"
+    
+    if not rows:
+        return f"No active listings{' in ' + city if city else ''} found."
+    
+    prices = [r.get("list_price", 0) for r in rows if r.get("list_price")]
+    sqfts = [r.get("sqft", 0) for r in rows if r.get("sqft")]
+    cities = set(r.get("address_city", "") for r in rows)
+    
+    if prices:
+        sp = sorted(prices)
+        median = sp[len(sp) // 2]
+        avg_ppsf = round(sum(p / s for p, s in zip(prices, sqfts) if s > 0) / max(len([x for x in sqfts if x > 0]), 1), 2) if sqfts else 0
+    else:
+        median = avg_ppsf = 0
+    
+    return (
+        f"**Market Snapshot{' for ' + city if city else ''}** 📊\n\n"
+        f"  • Active Listings: {len(rows)}\n"
+        f"  • Median Price: ${median:,.0f}\n"
+        f"  • Avg Price/Sqft: ${avg_ppsf:.0f}\n"
+        f"  • Markets covered: {', '.join(sorted(cities)) if cities else 'N/A'}\n"
+        f"  • Data source: Your database\n\n"
+        f"*For deeper MLS-level data (days on market, price trends), connect an external data source.*"
+    )
+
+
+def _compare_neighborhoods(nb1: str, nb2: str, city: str = "") -> str:
+    """Compare two neighborhoods using DB listing data."""
+    def _nb_stats(name: str) -> dict:
+        if city:
+            rows = _query_db(
+                "SELECT list_price, beds, baths, sqft, address_city FROM properties WHERE status = 'ACTIVE' AND (LOWER(address_street) LIKE :n OR LOWER(address_city) LIKE :n OR LOWER(description) LIKE :n) AND LOWER(address_city) LIKE :c",
+                {"n": f"%{name.lower()}%", "c": f"%{city.lower()}%"}
+            )
+        else:
+            rows = _query_db(
+                "SELECT list_price, beds, baths, sqft, address_city FROM properties WHERE status = 'ACTIVE' AND (LOWER(address_street) LIKE :n OR LOWER(address_city) LIKE :n OR LOWER(description) LIKE :n)",
+                {"n": f"%{name.lower()}%"}
+            )
+        prices = [r.get("list_price", 0) for r in rows if r.get("list_price")]
+        sqfts = [r.get("sqft", 0) for r in rows if r.get("sqft")]
+        return {
+            "count": len(rows),
+            "avg_price": round(sum(prices) / len(prices)) if prices else 0,
+            "avg_ppsf": round(sum(p / s for p, s in zip(prices, sqfts) if s > 0) / max(len([x for x in sqfts if x > 0]), 1), 2) if sqfts and prices else 0,
+        }
+    
+    s1 = _nb_stats(nb1)
+    s2 = _nb_stats(nb2)
+    
+    if s1["count"] == 0 and s2["count"] == 0:
+        return f"No active listings found for '{nb1}' or '{nb2}'."
+    
+    result = f"**Neighborhood Comparison: {nb1} vs {nb2}**\n\n"
+    result += f"| Metric | {nb1} | {nb2} |\n|--------|------|------|\n"
+    result += f"| Active Listings | {s1['count']} | {s2['count']} |\n"
+    result += f"| Avg Price | ${s1['avg_price']:,} | ${s2['avg_price']:,} |\n"
+    result += f"| Avg Price/Sqft | ${s1['avg_ppsf']:.0f} | ${s2['avg_ppsf']:.0f} |\n"
+    
+    if s1["avg_price"] and s2["avg_price"]:
+        diff = ((s2["avg_price"] - s1["avg_price"]) / s1["avg_price"]) * 100
+        if abs(diff) < 5:
+            result += f"\n→ Similarly priced (within {abs(diff):.1f}%)."
+        elif diff > 0:
+            result += f"\n→ {nb2} is {diff:.0f}% more expensive."
+        else:
+            result += f"\n→ {nb1} is {abs(diff):.0f}% more expensive."
+    
+    return result
+
+
+def _summarize_contract(text: str) -> str:
+    """Analyze contract text using pattern matching."""
+    if not text or len(text.strip()) < 10:
+        return "Please provide the full contract text to analyze."
+    
+    import re as _re
+    text_lower = text.lower()
+    wc = len(text.split())
+    
+    clauses = {
+        "Purchase Price": _re.search(r"(?:purchase\s*price|sale\s*price|consideration)\s*:?\s*\$?([\d,]+)", text_lower),
+        "Closing Date": _re.search(r"(?:closing\s*date|settlement\s*date|completion\s*date)\s*:?\s*([\w\s,/]+)", text_lower),
+        "Earnest Money": _re.search(r"(?:earnest\s*money|deposit)\s*:?\s*\$?([\d,]+)", text_lower),
+        "Inspection Period": _re.search(r"(?:inspection\s*period|due\s*diligence)\s*:?\s*([\d\s-]+days?)", text_lower),
+    }
+    found = {k: m.group(1).strip() for k, m in clauses.items() if m}
+    
+    risks = []
+    if _re.search(r"\bas\s*is\b", text_lower): risks.append("⚠️ 'As-is' clause — buyer accepts all defects")
+    if _re.search(r"(?:no\s*warranty|as\s*is\s*where\s*is)", text_lower): risks.append("⚠️ No warranty clause")
+    if _re.search(r"(?:non[\s-]*refundable|no\s*refund)", text_lower): risks.append("⚠️ Non-refundable deposit")
+    if not risks: risks.append("✅ No common risk patterns detected")
+    
+    result = f"**Contract Analysis** ({wc} words)\n\n"
+    if found:
+        result += "**Detected Clauses:**\n"
+        for k, v in found.items():
+            result += f"  • {k}: {v}\n"
+    else:
+        result += "No standard clauses auto-detected. Key items to verify: price, closing, contingencies.\n"
+    result += "\n**Risk Flags:**\n" + "\n".join(f"  {r}" for r in risks)
+    return result
+
+
+def _extract_deadlines(text: str) -> str:
+    """Extract time-sensitive clauses from contract text."""
+    if not text or len(text.strip()) < 10:
+        return "Please provide the contract text to extract deadlines from."
+    
+    import re as _re
+    text_lower = text.lower()
+    
+    deadlines = []
+    date_pattern = _re.findall(r"(?:on|by|before|within)\s+([\w\s,/]+\d{4})", text_lower)
+    for d in date_pattern[:5]:
+        deadlines.append(f"  • Date found: {d.strip()}")
+    
+    day_patterns = _re.findall(r"(\d[\s-]*days?)", text_lower)
+    for d in day_patterns[:5]:
+        deadlines.append(f"  • Timeline: {d.strip()}")
+    
+    if not deadlines:
+        deadlines = [
+            "  • Inspection Period: Typically 7-10 days from acceptance",
+            "  • Financing Contingency: Typically 14-21 days",
+            "  • Closing Date: Typically 30-60 days from acceptance",
+            "  *(No specific dates found in text — above are standard estimates)*",
+        ]
+    
+    return "**Extracted Deadlines & Timelines:**\n\n" + "\n".join(deadlines)
 
 
 def _get_crew_info() -> str:
