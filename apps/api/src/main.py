@@ -194,17 +194,19 @@ async def seed_database():
         db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
         engine = create_engine(db_url)
         
-        # Add database package to path
-        for p in ["/packages/database", "./packages/database"]:
-            if os.path.isdir(p):
-                sys.path.insert(0, p)
-        
         # Create vector extension
         with engine.connect() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             conn.commit()
         
-        # Create tables from models
+        # Import models — database editable install is at /packages/database/src
+        # Must add to sys.path BEFORE the empty-string entry (which resolves to API's own src/)
+        _db_pkg = "/packages/database/src"
+        if os.path.isdir(_db_pkg):
+            # Remove empty string (resolves to CWD which shadows the database package)
+            sys.path = [p for p in sys.path if p]
+            sys.path.insert(0, _db_pkg)
+        
         from src.base import Base
         from src.models import User, Lead, Property, AgentProfile, Client, Document, Conversation, Message, AIMemory, Workflow, WorkflowStep
         Base.metadata.create_all(engine)
