@@ -4,7 +4,7 @@ services:
     container_name: realty-postgres
     environment:
       POSTGRES_USER: realty
-      POSTGRES_PASSWORD: realty_local_dev
+      POSTGRES_PASSWORD: $POSTGRES_PASSWORD
       POSTGRES_DB: realty_ai
     ports:
       - "5433:5432"
@@ -16,6 +16,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    profiles:
+      - infra
 
   redis:
     image: redis:7-alpine
@@ -27,6 +29,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    profiles:
+      - infra
 
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
@@ -49,6 +53,8 @@ services:
       - "/app/config/config.yaml"
       - "--port"
       - "4000"
+    profiles:
+      - infra
 
   api:
     build:
@@ -58,40 +64,16 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://realty:realty_local_dev@postgres:5432/realty_ai
-      REDIS_URL: redis://redis:6379/0
-      LLM_API_BASE: http://litellm:4000
-      LLM_API_KEY: anything
-      LLM_DEFAULT_MODEL: fast-model
-      LLM_LOCAL_MODEL: local-realty-model
-      CORS_ORIGINS: http://localhost:3000
+      DATABASE_URL: $DATABASE_URL
+      REDIS_URL: $REDIS_URL
+      LLM_API_BASE: $LLM_API_BASE
+      LLM_API_KEY: $LLM_API_KEY
+      LLM_DEFAULT_MODEL: $LLM_DEFAULT_MODEL
+      CORS_ORIGINS: $CORS_ORIGINS
+      AUTH_SECRET_KEY: $AUTH_SECRET_KEY
     volumes:
       - ./apps/api:/app
       - ./packages:/packages
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      litellm:
-        condition: service_started
-    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
-
-  web:
-    build:
-      context: ./apps/web
-      dockerfile: Dockerfile
-    container_name: realty-web
-    ports:
-      - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-    volumes:
-      - ./apps/web:/app
-      - /app/node_modules
-      - /app/.next
-    depends_on:
-      - api
 
 volumes:
   pgdata:
