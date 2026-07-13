@@ -23,7 +23,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from tools import ALL_TOOLS
 from prompts import SYSTEM_PROMPT
-from models import get_model, get_fast_model, get_primary_model, get_fallback_model, _enable_fallback
+from models import get_model, get_fast_model, get_primary_model, get_fallback_model
 from router import classify_task
 from agents.supervisor import route, get_agent_tools, AGENT_REGISTRY
 from activity import record_activity
