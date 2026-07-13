@@ -1,8 +1,8 @@
 """
 Mem0 Memory Adapter for Athena.
 
-Replaces the hand-rolled SQLite user_facts system with Mem0's
-automatic entity extraction, semantic search, and memory scoring.
+Provides automatic entity extraction, semantic search, and memory scoring
+on top of the PostgreSQL-backed memory system.
 
 Architecture:
   ┌─────────────┐     ┌──────────┐     ┌───────────┐
@@ -10,10 +10,11 @@ Architecture:
   │  (agent.py) │     │ Adapter  │     │ (vectors) │
   └─────────────┘     │          │     └───────────┘
         │             │          │     ┌───────────┐
-        ▼             │          │────▶│  SQLite   │
-  ┌─────────────┐     │          │     │ (history) │
-  │  SQLite     │     └──────────┘     └───────────┘
-  │ (convos,    │
+        ▼             │          │────▶│ mem0_hist │
+  ┌─────────────┐     │          │     │ (SQLite)  │
+  │ PostgreSQL  │     └──────────┘     └───────────┘
+  │ (facts,     │
+  │  convos,    │
   │  notes,     │
   │  configs)   │
   └─────────────┘
@@ -148,14 +149,14 @@ def _create_mem0_instance():
             return instance
         except TimeoutError:
             signal.alarm(0)
-            logger.warning("Mem0 init timed out. Falling back to SQLite-only memory.")
+            logger.warning("Mem0 init timed out. Running without semantic memory.")
             return None
         except Exception as e:
             signal.alarm(0)
-            logger.warning(f"Mem0 init failed: {e}. Falling back to SQLite-only memory.")
+            logger.warning(f"Mem0 init failed: {e}. Running without semantic memory.")
             return None
     except ImportError as e:
-        logger.warning(f"Mem0 package not installed: {e}. Falling back to SQLite-only memory.")
+        logger.warning(f"Mem0 package not installed: {e}. Running without semantic memory.")
         return None
 
 

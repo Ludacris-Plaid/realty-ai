@@ -19,7 +19,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
-from .memory import profile_summary as sqlite_profile_summary, remember, recall, save_conversation, search_conversations, consolidate as consolidate_memory, get_or_create_active_conversation, save_message, get_conversation_messages, reset_conversation as reset_conversation_db, list_conversations
+from .memory import profile_summary, remember, recall, save_conversation, search_conversations, consolidate as consolidate_memory, get_or_create_active_conversation, save_message, get_conversation_messages, reset_conversation as reset_conversation_db, list_conversations
 from .mem0_adapter import (
     is_available as mem0_available,
     add_interaction as mem0_add_interaction,
@@ -298,7 +298,7 @@ class AthenaAgent:
 
     def chat(self, message: str) -> dict:
         """Send a message to Athena and get a response. Persists conversation history."""
-        profile = sqlite_profile_summary()
+        profile = profile_summary()
         tool_names = [t.name for t in self.tools]
         tool_calls_used = []
         
@@ -478,10 +478,10 @@ class AthenaAgent:
     
     def get_state(self) -> dict:
         """Get Athena internal state for the dashboard overview."""
-        from .memory import get_skills, profile_summary as sqlite_profile, get_conversation_messages
+        from .memory import get_skills, profile_summary, get_conversation_messages
         
         skills = get_skills()
-        profile_info = sqlite_profile()
+        profile_info = profile_summary()
         recent_messages = get_conversation_messages(self.conversation_id, limit=10)
         mem_count = mem0_memory_count()
         

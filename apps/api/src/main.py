@@ -208,7 +208,7 @@ async def seed_database():
         # Import database ORM models
         # PYTHONPATH has /packages/database/src as first entry for this
         from base import Base
-        from models import User, Lead, Property, AgentProfile, Client, Document, Conversation, Message, AIMemory, Workflow, WorkflowStep
+        from models import User, Lead, Property, AgentProfile, Client, Document, Conversation, Message, AIMemory, Workflow, WorkflowStep, AthenaFact, AthenaConvThread, AthenaChatMessage, AthenaConversation, AthenaSkill, AthenaNote, AthenaBotConfig
         Base.metadata.create_all(engine)
         
         # Create operational tables (raw SQL — not yet in ORM models)
