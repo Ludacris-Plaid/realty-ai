@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: realty-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-realty}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Must set POSTGRES_PASSWORD}
+      POSTGRES_DB: realty_ai
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-realty}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: realty-api
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-realty}:${POSTGRES_PASSWORD}@postgres:5432/realty_ai
+      LLM_API_BASE: ${LLM_API_BASE:-https://api.featherless.ai/v1}
+      LLM_API_KEY: ${LLM_API_KEY:?Must set LLM_API_KEY}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-Qwen/Qwen3-4B-Instruct-2507}
+      LLM_FALLBACK_API_BASE: ${LLM_FALLBACK_API_BASE:-}
+      LLM_FALLBACK_API_KEY: ${LLM_FALLBACK_API_KEY:-}
+      LLM_FALLBACK_MODEL: ${LLM_FALLBACK_MODEL:-meta/llama-3.1-8b-instruct}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-change-me-in-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

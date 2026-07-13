@@ -30,7 +30,10 @@ if os.path.exists(_env_path):
                 k, v = k.strip(), v.strip().strip("\"'")
                 os.environ.setdefault(k, v)
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "ai"))
+_pkg_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "packages", "ai")
+if not os.path.isdir(_pkg_path):
+    _pkg_path = "/packages/ai"  # Docker layout
+sys.path.insert(0, _pkg_path)
 
 from agent import ask
 from briefing import generate_briefing, get_briefing_data

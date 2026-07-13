@@ -1,0 +1,16 @@
+[Unit]
+Description=RealtyAI Infrastructure (PostgreSQL + Redis)
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=exec
+User=dysthemix
+WorkingDirectory=/home/dysthemix/projects/realty-ai
+ExecStart=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.prod.yml up postgres redis
+ExecStop=/usr/bin/docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
