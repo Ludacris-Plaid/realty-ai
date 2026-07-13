@@ -7,7 +7,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
   LayoutDashboard, Users, Building2, FileText, Calendar,
-  Megaphone, Bot, BarChart3, Settings, ChevronLeft, Book,
+  Megaphone, Bot, BarChart3, Settings, ChevronLeft, Book, BrainCircuit,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -19,6 +19,7 @@ const navItems = [
   { label: "Calendar", href: "/dashboard/calendar", icon: Calendar },
   { label: "Marketing", href: "/dashboard/marketing", icon: Megaphone },
   { label: "AI Agents", href: "/dashboard/ai-agents", icon: Bot },
+  { label: "Hermes AI", href: "/dashboard/hermes", icon: BrainCircuit },
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
   { label: "Docs", href: "/docs", icon: Book },

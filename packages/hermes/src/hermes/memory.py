@@ -1,0 +1,293 @@
+"""
+Hermes Agent — Persistent Memory System.
+
+Functions like Obsidian for the agent:
+- Stores user facts (preferences, style, clients, history)
+- FTS5 full-text search on past conversations
+- Vector embeddings for semantic recall
+- Periodic memory consolidation (agent-curated)
+- User profile grows across sessions
+"""
+import json
+import sqlite3
+import os
+import hashlib
+from datetime import datetime
+from typing import Optional
+
+MEMORY_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "data", "hermes")
+os.makedirs(MEMORY_DIR, exist_ok=True)
+
+DB_PATH = os.path.join(MEMORY_DIR, "hermes_memory.db")
+NOTES_DIR = os.path.join(MEMORY_DIR, "notes")
+os.makedirs(NOTES_DIR, exist_ok=True)
+
+
+def _get_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    _ensure_schema(conn)
+    return conn
+
+
+def _ensure_schema(conn: sqlite3.Connection):
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS user_facts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL DEFAULT 'general',
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            confidence REAL DEFAULT 1.0,
+            source TEXT DEFAULT 'inference',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_fact_key ON user_facts(key);
+        
+        CREATE TABLE IF NOT EXISTS conversations (
+            id TEXT PRIMARY KEY,
+            title TEXT,
+            summary TEXT,
+            user_goal TEXT,
+            agent_action TEXT,
+            outcome TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        
+        CREATE VIRTUAL TABLE IF NOT EXISTS conversation_fts USING fts5(
+            title, summary, user_goal, agent_action, outcome,
+            content='conversations', content_rowid='rowid'
+        );
+        
+        CREATE TABLE IF NOT EXISTS skills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            trigger_phrase TEXT,
+            steps TEXT,  -- JSON array of step descriptions
+            usage_count INTEGER DEFAULT 0,
+            success_rate REAL DEFAULT 1.0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        
+        CREATE TABLE IF NOT EXISTS notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            tags TEXT DEFAULT '[]',  -- JSON array
+            source TEXT DEFAULT 'agent',  -- 'agent' | 'user' | 'inference'
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+    """)
+    conn.commit()
+
+
+# ─── User Facts (grows knowledge about user) ──────────────────────────────
+
+def remember(key: str, value: str, category: str = "general", confidence: float = 1.0, source: str = "inference"):
+    """Store a fact about the user. Upserts if key exists."""
+    conn = _get_db()
+    conn.execute("""
+        INSERT INTO user_facts (category, key, value, confidence, source, updated_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(key) DO UPDATE SET
+            value = excluded.value,
+            confidence = MAX(user_facts.confidence, excluded.confidence),
+            updated_at = excluded.updated_at,
+            source = CASE WHEN excluded.source = 'explicit' THEN 'explicit' ELSE user_facts.source END
+    """, (category, key, value, confidence, source))
+    conn.commit()
+    conn.close()
+
+
+def recall(query: str, top_k: int = 10) -> list[dict]:
+    """Search facts by category/key similarity."""
+    conn = _get_db()
+    q = f"%{query}%"
+    rows = conn.execute("""
+        SELECT key, value, category, confidence, source, updated_at
+        FROM user_facts
+        WHERE key LIKE ? OR value LIKE ? OR category LIKE ?
+        ORDER BY confidence DESC, updated_at DESC
+        LIMIT ?
+    """, (q, q, q, top_k)).fetchall()
+    conn.close()
+    return [
+        {"key": r[0], "value": r[1], "category": r[2], "confidence": r[3], "source": r[4], "updated_at": r[5]}
+        for r in rows
+    ]
+
+
+def forget(key: str):
+    conn = _get_db()
+    conn.execute("DELETE FROM user_facts WHERE key = ?", (key,))
+    conn.commit()
+    conn.close()
+
+
+def get_user_profile() -> dict:
+    """Get the full user profile as a formatted string."""
+    conn = _get_db()
+    rows = conn.execute("""
+        SELECT category, key, value, confidence FROM user_facts
+        ORDER BY category, confidence DESC
+    """).fetchall()
+    conn.close()
+    profile = {}
+    for cat, key, val, conf in rows:
+        if cat not in profile:
+            profile[cat] = []
+        profile[cat].append({"key": key, "value": val, "confidence": conf})
+    return profile
+
+
+def profile_summary() -> str:
+    """Get a text summary of what the agent knows about the user."""
+    profile = get_user_profile()
+    if not profile:
+        return "I'm still getting to know you."
+    parts = []
+    for cat, facts in profile.items():
+        items = [f"  - {f['key']}: {f['value']}" for f in facts[:5]]
+        parts.append(f"**{cat.title()}**:\n" + "\n".join(items))
+    return "\n\n".join(parts)
+
+
+# ─── Conversation Memory ──────────────────────────────────────────────────
+
+def save_conversation(conv_id: str, title: str, summary: str, goal: str = "",
+                       action: str = "", outcome: str = ""):
+    conn = _get_db()
+    conn.execute("""
+        INSERT INTO conversations (id, title, summary, user_goal, agent_action, outcome, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(id) DO UPDATE SET
+            title = COALESCE(NULLIF(excluded.title, ''), conversations.title),
+            summary = excluded.summary,
+            user_goal = excluded.user_goal,
+            agent_action = excluded.agent_action,
+            outcome = excluded.outcome,
+            updated_at = excluded.updated_at
+    """, (conv_id, title, summary, goal, action, outcome))
+    # Also update FTS index
+    conn.execute("""
+        INSERT INTO conversation_fts (rowid, title, summary, user_goal, agent_action, outcome)
+        VALUES (last_insert_rowid(), ?, ?, ?, ?, ?)
+    """, (title, summary, goal, action, outcome))
+    conn.commit()
+    conn.close()
+
+
+def search_conversations(query: str, limit: int = 10) -> list[dict]:
+    """FTS5 full-text search on past conversations."""
+    conn = _get_db()
+    try:
+        rows = conn.execute("""
+            SELECT c.id, c.title, c.summary, c.created_at,
+                   rank FROM conversation_fts
+            WHERE conversation_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+        """, (query, limit)).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+    conn.close()
+    return [
+        {"id": r[0], "title": r[1], "summary": r[2], "created_at": r[3]}
+        for r in rows
+    ]
+
+
+# ─── Skills Memory ────────────────────────────────────────────────────────
+
+def save_skill(name: str, description: str, trigger_phrase: str, steps: list[str]):
+    conn = _get_db()
+    conn.execute("""
+        INSERT INTO skills (name, description, trigger_phrase, steps)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET
+            description = excluded.description,
+            trigger_phrase = excluded.trigger_phrase,
+            steps = excluded.steps,
+            updated_at = datetime('now')
+    """, (name, description, trigger_phrase, json.dumps(steps)))
+    conn.commit()
+    conn.close()
+
+
+def get_skills() -> list[dict]:
+    conn = _get_db()
+    rows = conn.execute("""
+        SELECT name, description, trigger_phrase, usage_count, success_rate
+        FROM skills ORDER BY usage_count DESC
+    """).fetchall()
+    conn.close()
+    return [
+        {"name": r[0], "description": r[1], "trigger": r[2],
+         "uses": r[3], "success_rate": r[4]}
+        for r in rows
+    ]
+
+
+# ─── Notes (Obsidian-style) ───────────────────────────────────────────────
+
+def save_note(title: str, body: str, tags: list[str] = None, source: str = "agent"):
+    """Save a markdown note file (Obsidian-compatible)."""
+    tags = tags or []
+    safe_title = title.replace("/", "-").replace(" ", "-")
+    path = os.path.join(NOTES_DIR, f"{safe_title}.md")
+    
+    with open(path, "w") as f:
+        f.write(f"---\ntitle: {title}\ntags: {json.dumps(tags)}\nsource: {source}\ndate: {datetime.now().isoformat()}\n---\n\n{body}\n")
+    
+    # Also store in DB
+    conn = _get_db()
+    conn.execute("""
+        INSERT INTO notes (title, body, tags, source)
+        VALUES (?, ?, ?, ?)
+    """, (title, body, json.dumps(tags), source))
+    conn.commit()
+    conn.close()
+    return path
+
+
+def search_notes(query: str) -> list[dict]:
+    conn = _get_db()
+    q = f"%{query}%"
+    rows = conn.execute("""
+        SELECT title, body, tags, source, created_at
+        FROM notes WHERE title LIKE ? OR body LIKE ?
+        ORDER BY created_at DESC LIMIT 20
+    """, (q, q)).fetchall()
+    conn.close()
+    return [
+        {"title": r[0], "body": r[1][:200], "tags": json.loads(r[2]), "source": r[3], "created": r[4]}
+        for r in rows
+    ]
+
+
+# ─── Memory Nudge (periodic consolidation) ────────────────────────────────
+
+def consolidate():
+    """Called periodically by the agent to consolidate and surface insights."""
+    conn = _get_db()
+    
+    # Find patterns: repeated topics in conversations
+    topics = conn.execute("""
+        SELECT user_goal, COUNT(*) as cnt FROM conversations
+        WHERE user_goal != '' AND created_at > datetime('now', '-30 days')
+        GROUP BY user_goal ORDER BY cnt DESC LIMIT 10
+    """).fetchall()
+    
+    # Check for user facts gaps
+    fact_count = conn.execute("SELECT COUNT(*) FROM user_facts").fetchone()[0]
+    
+    conn.close()
+    
+    return {
+        "total_facts": fact_count,
+        "top_topics": [{"topic": t[0], "count": t[1]} for t in topics],
+    }

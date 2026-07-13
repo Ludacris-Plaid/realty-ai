@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import sys, os
+import sys, os, json
 
 # Load .env into environment BEFORE any AI imports (so models.py can read them)
 _env_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env")
@@ -40,6 +40,11 @@ from briefing import generate_briefing, get_briefing_data
 from agents.supervisor import route, AGENT_REGISTRY, classify_intent
 from activity import get_recent_activities, get_activity_stats, record_activity
 from approval import get_pending_approvals, approve as approve_action, reject as reject_action
+
+# ─── Hermes Agent ────────────────────────────────────────────────────────────
+from hermes.agent import get_hermes
+from hermes.tools import TOOL_DEFINITIONS
+from hermes.memory import profile_summary, recall, save_note, search_notes, get_skills, search_conversations as search_memory_conversations
 
 from .config import settings
 from .api.router import api_router
@@ -184,3 +189,96 @@ async def reject(approval_id: str, body: ApprovalAction):
         raise HTTPException(status_code=404, detail="Approval not found or already reviewed")
     record_activity("Human", f"Rejected: {result.get('summary', '')[:80]}", status="rejected")
     return {"status": "rejected", "approval": result}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HERMES AGENT ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+hermes_agent = None  # Lazy init on first request
+
+def _get_hermes():
+    global hermes_agent
+    if hermes_agent is None:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url) if db_url else None
+        hermes_agent = get_hermes(db_engine=engine)
+    return hermes_agent
+
+
+@app.post("/api/v1/hermes/chat")
+async def hermes_chat(query: AIQuery):
+    """Chat with the Hermes persistent agent. Controls the entire system via NL."""
+    agent = _get_hermes()
+    result = agent.chat(query.message)
+    return result
+
+
+@app.get("/api/v1/hermes/state")
+async def hermes_state():
+    """Get Hermes agent internal state — skills, memory, profile."""
+    agent = _get_hermes()
+    return {"agent": agent.get_state(), "tools": TOOL_DEFINITIONS}
+
+
+@app.get("/api/v1/hermes/memory")
+async def hermes_memory(query: str = ""):
+    """Search Hermes memory (facts, conversations, notes)."""
+    if not query:
+        return {"profile": profile_summary(), "skills": get_skills()}
+    facts = recall(query)
+    convs = search_memory_conversations(query)
+    notes = search_notes(query)
+    return {"facts": facts, "conversations": convs, "notes": notes}
+
+
+@app.get("/api/v1/hermes/system-overview")
+async def hermes_system_overview():
+    """Full system overview — all counts, health, agent state."""
+    try:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        if db_url:
+            engine = create_engine(db_url)
+            with Session(engine) as session:
+                from sqlalchemy import text
+                leads = session.execute(text("SELECT COUNT(*) FROM leads")).scalar() or 0
+                listings = session.execute(text("SELECT COUNT(*) FROM properties")).scalar() or 0
+                hot = session.execute(text("SELECT COUNT(*) FROM leads WHERE ai_score >= 80")).scalar() or 0
+                active = session.execute(text("SELECT COUNT(*) FROM properties WHERE status = 'ACTIVE'")).scalar() or 0
+        else:
+            leads = listings = hot = active = 0
+    except:
+        leads = listings = hot = active = 0
+    
+    import psutil
+    cpu = psutil.cpu_percent()
+    mem = psutil.virtual_memory()
+    
+    return {
+        "business": {
+            "total_leads": leads,
+            "hot_leads": hot,
+            "total_listings": listings,
+            "active_listings": active,
+        },
+        "system": {
+            "cpu_percent": cpu,
+            "memory_percent": mem.percent,
+            "memory_gb": round(mem.used / (1024**3), 1),
+            "memory_total_gb": round(mem.total / (1024**3), 1),
+        },
+        "ai": {
+            "model": os.environ.get("LLM_DEFAULT_MODEL", "unsloth/Llama-3.2-3B-Instruct"),
+            "fallback": os.environ.get("LLM_FALLBACK_MODEL", "meta/llama-3.1-8b-instruct"),
+            "agents": [
+                {"id": k, "name": v["name"]}
+                for k, v in AGENT_REGISTRY.items()
+            ] if 'AGENT_REGISTRY' in dir() else [],
+        }
+    }

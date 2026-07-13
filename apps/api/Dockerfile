@@ -7,9 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev &
 COPY packages/database /packages/database
 COPY packages/ai /packages/ai
 COPY packages/integrations /packages/integrations
+COPY packages/hermes /packages/hermes
 RUN pip install --no-cache-dir -e /packages/database && \
     pip install --no-cache-dir -e /packages/ai && \
-    pip install --no-cache-dir -e /packages/integrations
+    pip install --no-cache-dir -e /packages/integrations && \
+    pip install --no-cache-dir -e /packages/hermes
 
 # Install API package
 COPY apps/api/pyproject.toml /app/apps/api/
