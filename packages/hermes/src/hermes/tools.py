@@ -568,7 +568,14 @@ def _market_snapshot(city: str = "") -> str:
     if prices:
         sp = sorted(prices)
         median = sp[len(sp) // 2]
-        avg_ppsf = round(sum(p / s for p, s in zip(prices, sqfts) if s > 0) / max(len([x for x in sqfts if x > 0]), 1), 2) if sqfts else 0
+        ppsf_values = []
+        for p, s in zip(prices, sqfts):
+            try:
+                if s and s > 0 and p and p > 0:
+                    ppsf_values.append(float(p) / float(s))
+            except (ZeroDivisionError, ValueError, TypeError):
+                continue
+        avg_ppsf = round(sum(ppsf_values) / len(ppsf_values), 2) if ppsf_values else 0
     else:
         median = avg_ppsf = 0
     
