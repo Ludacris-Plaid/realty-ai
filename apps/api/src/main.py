@@ -211,8 +211,10 @@ async def seed_database():
                 break
         if not _seed_path:
             raise FileNotFoundError(f"seed.py not found at {_seed_paths}")
+        sys.path.insert(0, os.path.dirname(os.path.dirname(_seed_path)))  # add packages/database/src to path
         sys.path.insert(0, os.path.dirname(_seed_path))
-        exec(open(_seed_path).read())
+        seed_ns = {"__name__": "__main__"}
+        exec(open(_seed_path).read(), seed_ns)
         return {"status": "seeded", "database": db_url.split("@")[1].split("/")[0]}
     except Exception as e:
         return {"status": "error", "detail": str(e)}
