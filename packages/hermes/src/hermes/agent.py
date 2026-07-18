@@ -157,8 +157,12 @@ class AthenaAgent:
         # Try tiers: opencode-zen → 9router tunnel → featherless → nvidia
         self.llm = self._build_llm(self.model_name)
         
-        # Bind tools to the LLM
-        self.llm_with_tools = self.llm.bind_tools(self.tools)
+        # Build a separate LLM instance for tool calling
+        # ResilientLLM.bind_tools() mutates and returns the SAME instance,
+        # so sharing it means the summarization call also has tools bound,
+        # causing recursive tool calls. Two instances avoids this.
+        tool_llm = self._build_llm(self.model_name)
+        self.llm_with_tools = tool_llm.bind_tools(self.tools)
         
         self._prompt = SYSTEM_PROMPT
         logger.info(f"Athena initialized. Session: {self.session_id}, Model: {self.model_name}")
@@ -260,6 +264,49 @@ class AthenaAgent:
         
         return cleaned, tool_calls
 
+    def _execute_and_summarize_tools(self, xml_tool_calls: list[dict], messages: list) -> tuple[list[str], list]:
+        """Execute detected tool calls and append results to messages.
+        
+        Returns (tool_names_used, tool_results) where tool_results is a
+        list of (name, result_string_or_None) pairs so the caller can
+        craft a fallback summary if the second LLM call fails.
+        """
+        used = []
+        results = []
+        for tc in xml_tool_calls:
+            tool_name = tc.get('name', '')
+            tool_args = tc.get('args', {})
+            if not tool_name:
+                continue
+            used.append(tool_name)
+            try:
+                result = execute_tool(tool_name, tool_args)
+                messages.append(SystemMessage(content=f"Tool '{tool_name}' result:\n{result[:1500]}"))
+                results.append((tool_name, result))
+            except Exception as e:
+                err = str(e)[:200]
+                messages.append(SystemMessage(content=f"Tool '{tool_name}' error: {err}"))
+                results.append((tool_name, None))
+        return used, results
+
+    def _build_tool_fallback(self, tool_results: list[tuple[str, str | None]]) -> str:
+        """Build a basic response from tool results when the second LLM call fails.
+        
+        This ensures the user ALWAYS gets meaningful data back, even if the
+        summarization LLM is down or returns empty content.
+        """
+        parts = []
+        for name, result in tool_results:
+            if result is None:
+                parts.append(f"I checked {name} but encountered an error.")
+            elif result and len(result) > 10:
+                # Extract the first meaningful line or summary
+                summary = result[:2000]
+                parts.append(summary)
+            else:
+                parts.append(f"I checked {name} but found no data.")
+        return "\n\n".join(parts)
+
     def chat(self, message: str) -> dict:
         """Send a message to Athena and get a response. Persists conversation history."""
         profile = profile_summary()
@@ -323,6 +370,9 @@ class AthenaAgent:
             elif hasattr(response, 'response_metadata') and response.response_metadata:
                 response_text = str(response.response_metadata.get('message', {}).get('content', ''))
             
+            # Save pre-tool text in case XML cleaning wipes it
+            pre_tool_text = response_text
+            
             # Execute tool calls — two formats:
             # 1. Structured function calls (OpenAI-compatible models → response.tool_calls)
             # 2. XML tool calls in response text (hy3-free → <tool_call:...> syntax)
@@ -340,8 +390,14 @@ class AthenaAgent:
                 if parsed:
                     response_text = cleaned  # Strip XML from conversational response
                     xml_tool_calls = parsed
+                    # If the entire response was XML (cleaned is empty), use a
+                    # reasonable pre-tool preamble based on what tools were called
+                    if not response_text.strip():
+                        tool_names_str = ", ".join(t.get("name", "?") for t in parsed)
+                        response_text = f"Let me look up those details for you — checking {tool_names_str} now."
             
             # Execute all detected tool calls
+            tool_results = []  # (name, result_string_or_None)
             for tc in xml_tool_calls:
                 tool_name = tc.get('name', '')
                 tool_args = tc.get('args', {})
@@ -351,8 +407,11 @@ class AthenaAgent:
                 try:
                     result = execute_tool(tool_name, tool_args)
                     messages.append(SystemMessage(content=f"Tool '{tool_name}' result:\n{result[:1500]}"))
+                    tool_results.append((tool_name, result))
                 except Exception as e:
-                    messages.append(SystemMessage(content=f"Tool '{tool_name}' error: {str(e)[:200]}"))
+                    err = str(e)[:200]
+                    messages.append(SystemMessage(content=f"Tool '{tool_name}' error: {err}"))
+                    tool_results.append((tool_name, None))
             
             # If tools were called, get the final response with tool results
             if tool_calls_used:
@@ -361,10 +420,21 @@ class AthenaAgent:
                     if hasattr(response, 'content') and response.content:
                         response_text = response.content
                 except Exception:
-                    pass  # Keep original response_text if second LLM call fails
+                    # Second LLM call failed — build a structured fallback
+                    # from tool results so the user never gets a dead end
+                    fallback = self._build_tool_fallback(tool_results)
+                    if fallback:
+                        response_text = fallback
             
             if not response_text:
-                response_text = "I'm here. How can I help you?"
+                # Absolute last resort — should never happen with tool fallback above
+                if tool_calls_used:
+                    response_text = (
+                        f"I ran a quick check of your system and found data. "
+                        f"Would you like me to walk through it with you?"
+                    )
+                else:
+                    response_text = "I'm here. How can I help you?"
             
             # Sanitize: strip XML tool-call artifacts from model output
             response_text = _sanitize_response(response_text)
@@ -382,6 +452,14 @@ class AthenaAgent:
                 "provider": getattr(self.llm, "last_provider", None),
                 "tool_calls": str(tool_calls_used)[:200] if tool_calls_used else [],
                 "conversation_id": self.conversation_id,
+            }
+            
+        except Exception as e:
+            logger.error(f"Athena chat error: {e}")
+            return {
+                "response": f"I encountered an error: {str(e)[:200]}. Let me try a simpler approach.",
+                "model_used": self.model_name,
+                "error": str(e),
             }
             
         except Exception as e:

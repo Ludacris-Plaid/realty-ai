@@ -91,11 +91,7 @@ _MOCK_PROPERTIES = [
 
 @tool
 def get_hot_leads() -> list[dict]:
-    """Returns the highest-priority real estate leads sorted by AI score.
-    
-    Use this when the agent asks about hot leads, top leads, best leads,
-    or who to call first.
-    """
+    """Top leads by AI score. Use for hot/best leads or who to call first."""
     try:
         if DB_AVAILABLE:
             db_leads = get_hot_leads_from_db()
@@ -125,11 +121,11 @@ def get_hot_leads() -> list[dict]:
 
 @tool
 def search_leads(name: Optional[str] = None, status: Optional[str] = None) -> list[dict]:
-    """Search leads by name or status. Returns matching leads with full details.
+    """Find leads by name or status.
     
     Args:
-        name: Partial name to search for (first or last).
-        status: Filter by lead status (new, qualifying, qualified, contacted, etc.).
+        name: Partial name (first or last).
+        status: Lead status (new, qualifying, qualified, contacted, ...).
     """
     try:
         if DB_AVAILABLE:
@@ -147,10 +143,7 @@ def search_leads(name: Optional[str] = None, status: Optional[str] = None) -> li
 
 @tool
 def get_lead_count() -> dict:
-    """Returns total lead count broken down by status.
-    
-    Use this when asked how many leads exist or for a lead summary.
-    """
+    """Lead total + count by status. Use for 'how many leads'."""
     try:
         if DB_AVAILABLE:
             return get_lead_count_from_db()
@@ -165,10 +158,7 @@ def get_lead_count() -> dict:
 
 @tool
 def get_active_listings() -> list[dict]:
-    """Returns all active property listings.
-    
-    Use this when asked about current listings, active properties, or what's for sale.
-    """
+    """All active listings. Use for 'what's for sale' / current listings."""
     try:
         if DB_AVAILABLE:
             return get_active_listings_from_db()
@@ -181,13 +171,13 @@ def get_active_listings() -> list[dict]:
 @tool
 def search_properties(city: Optional[str] = None, min_price: Optional[float] = None,
                       max_price: Optional[float] = None, beds: Optional[int] = None) -> list[dict]:
-    """Search property listings by city, price range, or bedrooms.
+    """Filter listings by city, price range, or bedrooms.
     
     Args:
-        city: Filter by city name.
+        city: City name.
         min_price: Minimum list price.
         max_price: Maximum list price.
-        beds: Minimum number of bedrooms.
+        beds: Minimum bedrooms.
     """
     try:
         if DB_AVAILABLE:

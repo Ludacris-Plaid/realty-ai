@@ -27,6 +27,7 @@ from llm_config import get_model, get_fast_model, get_primary_model, get_fallbac
 from router import classify_task
 from agents.supervisor import route, get_agent_tools, AGENT_REGISTRY
 from activity import record_activity
+from token_saver import truncate_messages
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def ask(message: str, override_model: Optional[str] = None) -> dict:
     # Step 3: Execute — gentle fallback (no hard crash)
     try:
         result = task_agent.invoke(
-            {"messages": [HumanMessage(content=message)]}
+            {"messages": truncate_messages([HumanMessage(content=message)])}
         )
     except Exception as e:
         err_str = str(e).lower()
@@ -93,7 +94,7 @@ def ask(message: str, override_model: Optional[str] = None) -> dict:
         try:
             fallback_agent = build_agent(model_name, extra_tools=specialist_tools, force_fallback=True)
             result = fallback_agent.invoke(
-                {"messages": [HumanMessage(content=message)]}
+                {"messages": truncate_messages([HumanMessage(content=message)])}
             )
             model_name = f"{model_name} (via fallback)"
         except Exception as e2:

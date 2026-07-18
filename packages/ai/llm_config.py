@@ -18,6 +18,15 @@ from typing import Optional
 from langchain_openai import ChatOpenAI
 import httpx
 
+# Guerrilla free-LLM pool (9router-first, quota-aware). Imported lazily so a
+# missing dep never breaks the legacy tiered path below.
+try:
+    from free_llm import ResilientLLM, build_resilient_llm
+    from token_saver import tier_from_model
+    _HAVE_GUERRILLA = True
+except Exception:  # pragma: no cover
+    _HAVE_GUERRILLA = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -82,12 +91,23 @@ def reset_fallback():
 # ─── Model Factory with Gentle Fallback ────────────────────────────────────────
 
 def get_model(model_name: Optional[str] = None) -> ChatOpenAI:
-    """Get ChatOpenAI with cascading fallback across all configured tiers.
-    
-    Tries tiers starting from `_fallback_level`. Falls through on total
-    provider failure only. Returns the best available model.
+    """Get a model with the guerrilla free-LLM pool as primary.
+
+    When the guerrilla pool is available (env GUERRILLA_LLM != '0'), we return
+    a ResilientLLM that maxes out 9router and falls back across all free
+    providers — $0 spend. Otherwise we fall back to the legacy tiered
+    ChatOpenAI chain so nothing breaks.
     """
     global _fallback_level
+
+    if _HAVE_GUERRILLA and os.environ.get("GUERRILLA_LLM", "1") != "0":
+        try:
+            name = model_name or get_fast_model()
+            # Privacy-sensitive tasks route to the keyless local 9router proxy.
+            prefer_local = "local" in name.lower()
+            return build_resilient_llm(name, prefer_local=prefer_local)
+        except Exception as e:
+            logger.warning("Guerrilla pool unavailable (%s); using legacy tiers", e)
 
     model = model_name or get_fast_model()
 

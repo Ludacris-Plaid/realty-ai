@@ -132,7 +132,19 @@ except Exception as _e:
 
 def remember(key: str, value: str, category: str = "general",
              confidence: float = 1.0, source: str = "inference"):
-    """Store a fact about the user. Upserts if key exists."""
+    """Store a fact about the user. Upserts if key exists.
+    
+    Guards: empty key or value are silently rejected to avoid
+    polluting the profile with junk entries.
+    """
+    if not key or not key.strip():
+        logger.debug("remember() called with empty key — skipped")
+        return
+    if not value or not value.strip():
+        logger.debug("remember() called with empty value — skipped")
+        return
+    key = key.strip()
+    value = value.strip()
     with Session(_engine) as s:
         s.execute(text("""
             INSERT INTO athena_facts (category, key, value, confidence, source, updated_at)
@@ -501,6 +513,26 @@ def recall(query: str, top_k: int = 10) -> list[dict]:
 
 
 # ─── Consolidation ────────────────────────────────────────────────────────────
+
+def cleanup_empty_facts() -> int:
+    """Remove facts with empty keys or values. Returns count removed."""
+    with Session(_engine) as s:
+        result = s.execute(
+            text("DELETE FROM athena_facts WHERE key = '' OR key IS NULL OR value = '' OR value IS NULL")
+        )
+        s.commit()
+    count = result.rowcount if result else 0
+    if count > 0:
+        logger.info(f"Cleaned up {count} empty fact(s) from memory profile")
+    return count
+
+
+# Clean up any empty facts on import (from stale interactions)
+try:
+    cleanup_empty_facts()
+except Exception:
+    pass
+
 
 def consolidate() -> dict:
     """Surface patterns from recent conversations. Called periodically."""
