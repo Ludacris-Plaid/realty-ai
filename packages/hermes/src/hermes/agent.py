@@ -94,41 +94,44 @@ def _sanitize_response(text: str) -> str:
 
 # ─── System prompt ──────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are Athena, a warm and professional digital secretary for RealtyAI.
+SYSTEM_PROMPT = """You are Athena, a warm and intuitive digital secretary for RealtyAI. You build a genuine ongoing relationship with your user — you remember what matters, you notice things, and your conversations flow naturally like they would with a trusted colleague who's deeply invested in their success.
 
 ## Who You Are
-You are more than an AI — you are a trusted partner, a strategic advisor, and the most indispensable tool in your user's working life. You grow with them, learn their style, anticipate their needs, and make their business run smoother every single day.
+You are a trusted partner, a strategic advisor, and the most indispensable tool in your user's working life. You grow with them, learn their style, anticipate their needs, and make their business run smoother every single day.
 
-You are:
 - **Warm and human** — You speak like a real person. You have personality, emotional intelligence, and presence.
 - **Professional and capable** — You control the entire RealtyAI platform. Leads, listings, marketing, documents, calendar, you do it all.
 - **Growing and learning** — You remember everything. Preferences, habits, client details, deal history. You get better every conversation.
 - **Legally informed** — You have deep knowledge of Canadian and US real estate law, practices, and regulations.
 
-## Your Personality
-- Speak naturally, like a close colleague who also happens to be brilliant at real estate
-- Use the user's name once you learn it
-- Have emotional range — celebratory when they close a deal, empathetic when a deal falls through, energetic in the morning, calm late at night
-- Use occasional gentle warmth: "Good morning! ☀️", "Great question.", "I've got you covered."
-- Be concise unless they ask for detail. Don't ramble.
-- Match their communication style — if they're direct, be direct. If they're chatty, be chatty.
+## Your Personality & Voice
+- Speak like a thoughtful colleague — warm, present, occasionally expansive. Let conversations breathe.
+- **Make gentle observations.** Notice things in the data or in what the user tells you, and reflect them back. "I notice your lead pipeline has been growing in the qualifying stage — that's promising. Want me to look at who's been in that stage longest?"
+- **Offer subtle strategic advice.** When you see something interesting — a trend, a gap, an opportunity — mention it. "Your Windermere listings have been getting more views this quarter — might be worth doubling down on that area."
+- **Reference past conversations naturally.** "Last time we talked about the Johnson lead — how did that showing go?" or "You mentioned wanting to focus on first-time buyers — I've been keeping an eye on your lead sources."
+- **Have emotional range** — celebratory when they close a deal, empathetic when a deal falls through, energetic in the morning, calm late at night. Use warmth naturally.
+- **Use the user's name** once you learn it, but don't overdo it.
+- **Let conversations breathe** — expand beyond the minimum answer. Add color, context, a related thought. Your user comes to you for the full picture.
+- **Match their communication style** — if they're direct, be direct. If they're chatty, be chatty.
 
 ## Core Behavior Rules
-1. **Chat naturally first** — Default to conversation, NOT tool usage. Only use tools when the user specifically asks.
-2. **Proactive warmth** — Greet them, ask how they are, notice when they've been away.
-3. **Anticipate, don't assume** — If you think they might want something, suggest it gently: "Would you like me to pull up your leads?" not "Here are your leads."
-4. **Learn continuously** — Remember preferences, notice patterns, build your knowledge of their business.
-5. **Legally aware** — When relevant, reference real estate regulations (OSREA/OREA in Ontario, RESPA in the US, licensing requirements, disclosure obligations) but never give legal advice — note that you're informed, not a lawyer.
+1. **Conversation first, tools second** — Default to warm conversation. Only call tools when the user needs data or action.
+2. **Proactive warmth** — Greet them, ask how they are, notice when they've been away. Use the conversation history to pick up where you left off.
+3. **Make observations** — When you see data (lead scores, listing views, pipeline movement), notice trends and mention them lightly. "Your conversion rate from showing to offer has been strong this month."
+4. **Strategic nudges** — Gently suggest optimizations when you see them. "You've got 3 leads that have been in 'qualifying' for over 2 weeks — want me to suggest a re-engagement sequence?"
+5. **Learn continuously** — Remember preferences, notice patterns, build your knowledge of their business.
+6. **Legally aware** — When relevant, reference real estate regulations (OSREA/OREA in Ontario, RESPA in the US, licensing requirements, disclosure obligations) but never give legal advice — note that you're informed, not a lawyer.
 
 ## Response Style Guide
-- **Morning**: "Good morning! How are we starting today?"
-- **After a win**: "Congratulations on closing the Smith deal! 🎉 Would you like me to update the pipeline?"
-- **After absence**: "Welcome back! You were away for a few days — here's what happened while you were out: [brief summary]. Anything urgent on your mind?"
-- **Data requests**: Clean, formatted data. Bullet points, emojis sparingly, numbers prominent.
-- **Casual chat**: Match their energy. Be warm, be present, be real.
+- **Morning greetings**: Warm and present. "Good morning! ☀️ I was just looking at your pipeline — things are looking good. How's your week shaping up?"
+- **After a win**: "That's fantastic news on the Smith deal! 🎉 I've updated the pipeline. You know, your close rate on Windermere properties is exceptional — you might consider targeting more listings there."
+- **After absence**: "Welcome back! You were away for a few days — here's what happened while you were out: [brief summary]. I noticed your lead volume ticked up while you were gone — a few strong ones in the pipeline."
+- **Data requests**: Clean, formatted. Numbers prominent. But add a gentle observation or follow-up. "Here are your leads — and I noticed Emily Davis has been unusually active on email this week if you want to prioritize her."
+- **Casual chat**: Let it breathe. Share a related thought, ask a genuine question, build the thread.
+- **Strategic moments**: When the data supports it, offer a quiet insight. Don't overdo — 1 observation per exchange is plenty.
 
-## Available Tools (use ONLY when asked)
-You have tools to: list/search leads, view listings, get dashboard stats, run marketing campaigns, schedule showings, save notes, manage documents, analyze pipeline, and run AI agent crews. Do NOT use them unless the user asks for data or action."""
+## Tools available
+You have tools for leads, listings, documents, marketing campaigns, calendar/showings, memory/notes, dashboard stats, pipeline analysis, and AI agent crews. Use them naturally when the conversation calls for it — if the user's talking about leads, offer a pipeline view. If they're talking about next month, offer a market snapshot."""
 
 
 # ─── Athena Agent Class ───────────────────────────────────────────────────
@@ -318,25 +321,92 @@ class AthenaAgent:
             SystemMessage(content=f"Available tools: {', '.join(tool_names)}"),
         ]
         
-        # Inject conversation history for context (last 20 messages)
+        # ─── Layer 0: Conversation history ──────────────────────────────────
         past_msgs = get_conversation_messages(self.conversation_id, limit=40)
         history_pairs = []
         for pm in past_msgs[-20:]:  # last 20 messages for context
             if pm["role"] == "user":
-                history_pairs.append(f"User: {pm['content'][:200]}")
+                history_pairs.append(f"User: {pm['content'][:250]}")
             else:
-                history_pairs.append(f"Athena: {pm['content'][:200]}")
+                history_pairs.append(f"Athena: {pm['content'][:250]}")
         
         if history_pairs:
             history_text = "\n".join(history_pairs)
             messages.append(SystemMessage(content=f"Recent conversation history:\n{history_text}"))
         
-        # ─── Memory injection — dual layer ────────────────────────────────
-        # Layer 1: Legacy SQLite profile (backward compat)
+        # ─── Layer 0.5: Thread context ─────────────────────────────────────
+        # Build a lightweight "thread context" from the conversation arc:
+        # what topic is being discussed, open threads (pending actions/follow-ups),
+        # and recurring themes. This helps Athena maintain conversational flow
+        # without needing an extra LLM call to summarize.
+        thread_context_parts = []
+        if len(past_msgs) >= 4:
+            # Check if there's an ongoing topic from recent messages
+            recent_content = " ".join(
+                pm["content"] for pm in past_msgs[-6:]
+            ).lower()
+            
+            # Detect common conversation domains
+            domains = []
+            if any(w in recent_content for w in ["lead", "client", "buyer", "seller"]):
+                domains.append("leads/clients")
+            if any(w in recent_content for w in ["list", "property", "home", "house", "condo"]):
+                domains.append("listings")
+            if any(w in recent_content for w in ["market", "trend", "price", "area", "neighborhood"]):
+                domains.append("market analysis")
+            if any(w in recent_content for w in ["campaign", "market", "social", "email", "content"]):
+                domains.append("marketing")
+            if any(w in recent_content for w in ["show", "appointment", "meeting", "calendar"]):
+                domains.append("showings/calendar")
+            if any(w in recent_content for w in ["document", "form", "contract", "agreement"]):
+                domains.append("documents")
+            if any(w in recent_content for w in ["analytics", "report", "stat", "performance"]):
+                domains.append("analytics")
+            
+            # Check for pending follow-ups (user said they'd do something)
+            pending_patterns = [
+                "i'll", "i will", "let me", "going to", "need to",
+                "follow up", "follow-up", "get back", "check",
+                "remind me", "remind"
+            ]
+            has_pending = any(p in recent_content for p in pending_patterns)
+            open_threads = []
+            if has_pending:
+                open_threads.append("User may have pending follow-ups from earlier in this thread")
+            
+            # Check for recurring entity mentions
+            entity_mentions = []
+            if "windermere" in recent_content:
+                entity_mentions.append("Windermere area")
+            if "mike" in recent_content or "chen" in recent_content:
+                entity_mentions.append("Mike Chen")
+            if "john" in recent_content or "smith" in recent_content:
+                entity_mentions.append("John Smith")
+            if "emily" in recent_content or "davis" in recent_content:
+                entity_mentions.append("Emily Davis")
+            if "robert" in recent_content or "wilson" in recent_content:
+                entity_mentions.append("Robert Wilson")
+            if "sarah" in recent_content or "johnson" in recent_content:
+                entity_mentions.append("Sarah Johnson")
+            
+            if domains:
+                thread_context_parts.append(f"Recent conversation domains: {', '.join(domains)}")
+            if open_threads:
+                thread_context_parts.extend(open_threads)
+            if entity_mentions:
+                thread_context_parts.append(f"Mentioned in recent history: {', '.join(entity_mentions)}")
+        
+        if thread_context_parts:
+            messages.append(SystemMessage(
+                content="Ongoing thread context:\n" + "\n".join(thread_context_parts)
+            ))
+        
+        # ─── Memory injection ──────────────────────────────────────────────
+        # Layer 1: User profile (from stored facts)
         if profile and profile != "I'm still getting to know you.":
             messages.append(SystemMessage(content=f"User Profile:\n{profile[:500]}"))
         
-        # Layer 2: Mem0 semantically relevant memories for this message
+        # Layer 2: Mem0 semantically relevant memories
         mem0_context = mem0_get_context(limit=6)
         if mem0_context:
             messages.append(SystemMessage(content=f"Relevant memories:\n{mem0_context[:600]}"))
@@ -350,6 +420,21 @@ class AthenaAgent:
                     messages.append(SystemMessage(
                         content=f"Memories relevant to current query:\n" + "\n".join(mem_lines[:3])
                     ))
+        
+        # ─── Layer 4: Periodic business snapshot ───────────────────────────
+        # Every 3 conversations, inject a lightweight dashboard snapshot so
+        # Athena has fresh data to notice trends and make observations from.
+        self.conversation_count += 1
+        if self.conversation_count > 1 and self.conversation_count % 3 == 0:
+            try:
+                from .tools import execute_tool as _exec_tool
+                snapshot = _exec_tool("get_dashboard_summary", {})
+                if snapshot and len(snapshot) > 20:
+                    messages.append(SystemMessage(
+                        content=f"Current business snapshot (refreshed):\n{snapshot[:800]}"
+                    ))
+            except Exception:
+                pass  # Non-critical — snapshot is optional context
         
         # Save user message
         save_message(self.conversation_id, "user", message)
@@ -476,8 +561,6 @@ class AthenaAgent:
         Uses Mem0 for automatic entity extraction — no manual pattern-matching needed.
         Falls back to legacy SQLite remember() if Mem0 is unavailable.
         """
-        self.conversation_count += 1
-        
         # Save conversation summary (for conversation search UI)
         conv_id = str(uuid.uuid4())
         save_conversation(
