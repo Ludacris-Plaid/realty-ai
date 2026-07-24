@@ -1,8 +1,9 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "@/components/dashboard/sidebar";
 import { AthenaFloating } from "@/components/ai/athena-floating";
+import { useEffect, useState } from "react";
 
 /** Map pathname to context hints for the floating Athena */
 function getPageContext(pathname: string): string | undefined {
@@ -20,7 +21,20 @@ function getPageContext(pathname: string): string | undefined {
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [authed, setAuthed] = useState(false);
   const pageContext = getPageContext(pathname);
+
+  useEffect(() => {
+    const token = localStorage.getItem("athena_token");
+    if (!token) {
+      router.replace("/login");
+    } else {
+      setAuthed(true);
+    }
+  }, [router]);
+
+  if (!authed) return null;
 
   return (
     <div className="flex min-h-screen bg-gray-50">

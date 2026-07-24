@@ -1,16 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
   LayoutDashboard, Users, Building2, FileText, Calendar,
   Megaphone, Bot, BarChart3, Settings, ChevronLeft, Book, Brain,
-  Sparkles, Database,
+  Sparkles, Database, LogOut,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const navItems = [
   // Athena — always first, always special
@@ -32,8 +32,23 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("athena_user");
+      if (raw) setUser(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+
+  function handleLogout() {
+    localStorage.removeItem("athena_token");
+    localStorage.removeItem("athena_user");
+    router.push("/");
+  }
 
   const sidebarContent = (
     <div className={cn(
@@ -106,17 +121,32 @@ export function Sidebar() {
 
       <Separator className="bg-gray-800" />
 
-      {/* User profile */}
-      <div className={cn("p-4", collapsed && "flex justify-center")}>
+      {/* User profile + logout */}
+      <div className={cn("p-4 space-y-2", collapsed && "flex flex-col items-center")}>
         <div className={cn("flex items-center gap-3", collapsed && "flex-col")}>
-          <Avatar alt="Sarah Chen" fallback="SC" size="sm" />
+          <Avatar
+            alt={user?.name || "Agent"}
+            fallback={(user?.name || "A").charAt(0).toUpperCase()}
+            size="sm"
+          />
           {!collapsed && (
             <div className="min-w-0">
-              <p className="text-sm font-medium text-white truncate">Sarah Chen</p>
-              <p className="text-xs text-gray-400 truncate">Agent</p>
+              <p className="text-sm font-medium text-white truncate">{user?.name || "Agent"}</p>
+              <p className="text-xs text-gray-400 truncate">{user?.email || "Agent"}</p>
             </div>
           )}
         </div>
+        <button
+          onClick={handleLogout}
+          className={cn(
+            "flex items-center gap-2 rounded-lg text-xs text-gray-400 hover:text-red-400 hover:bg-gray-800 transition-colors",
+            collapsed ? "justify-center p-2" : "w-full px-3 py-1.5"
+          )}
+          title="Log out"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          {!collapsed && <span>Log out</span>}
+        </button>
       </div>
     </div>
   );
