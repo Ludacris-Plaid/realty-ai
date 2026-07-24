@@ -61,10 +61,13 @@ function DocumentRow({ doc }: { doc: Document }) {
         </Badge>
       </div>
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm">
+        <Button variant="ghost" size="sm" onClick={() => window.open(`/api/v1/documents/${doc.id}/analyze`, '_blank')} title="Analyze with AI">
           <Sparkles className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="sm">
+        <Button variant="ghost" size="sm" onClick={() => {
+          const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+          window.open(`${API_BASE}/api/v1/documents/${doc.id}/download`, '_blank');
+        }} title="Download">
           <Download className="h-4 w-4" />
         </Button>
       </div>

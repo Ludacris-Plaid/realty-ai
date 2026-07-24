@@ -103,6 +103,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [userName, setUserName] = useState("");
+  const [recommendations, setRecommendations] = useState<any[]>([]);
+  const [recsLoading, setRecsLoading] = useState(true);
 
   useEffect(() => {
     try {
@@ -119,6 +121,18 @@ export default function DashboardPage() {
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+    const token = localStorage.getItem("athena_token");
+    fetch(`${API_BASE}/api/v1/dashboard/recommendations`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => r.json())
+      .then((d) => setRecommendations(d.recommendations || []))
+      .catch(() => setRecommendations([]))
+      .finally(() => setRecsLoading(false));
   }, []);
 
   return (
@@ -176,13 +190,25 @@ export default function DashboardPage() {
                 <p className="text-sm text-red-500">Failed to load: {error}</p>
               ) : (
                 <div className="space-y-3">
-                  {[
-                    { title: "Follow up with Mike Chen", description: "Pre-approved cash buyer ready to close. Response rate: high.", type: "lead", priority: "high" },
-                    { title: "Finish 123 Main St MLS description", description: "Listing has been in draft for 3 days. Generate an AI description to publish.", type: "listing", priority: "medium" },
-                    { title: "Review contract deadline for Emily Davis", description: "Inspection contingency expires in 2 days.", type: "deadline", priority: "high" },
-                  ].map((rec, i) => (
-                    <RecommendationCard key={i} item={rec} />
-                  ))}
+                  {recsLoading ? (
+                    <div className="space-y-3">
+                      {[1, 2, 3].map((i) => <RecommendationCard key={i} loading />)}
+                    </div>
+                  ) : recommendations.length === 0 ? (
+                    <p className="text-sm text-gray-400 py-4 text-center">No recommendations yet. Start using Athena to get insights.</p>
+                  ) : (
+                    recommendations.map((rec: any, i: number) => (
+                      <RecommendationCard
+                        key={i}
+                        item={{
+                          title: rec.title,
+                          description: rec.description,
+                          type: rec.category === "leads" ? "lead" : rec.category === "listings" ? "listing" : "deadline",
+                          priority: rec.priority,
+                        }}
+                      />
+                    ))
+                  )}
                 </div>
               )}
             </CardContent>

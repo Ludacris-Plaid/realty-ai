@@ -459,6 +459,330 @@ async def athena_state(current_user: Optional[TokenPayload] = Depends(get_curren
     return {"agent": agent.get_state(), "tools": TOOL_DEFINITIONS}
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SCRAPER & DATA ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class ScrapeRequest(BaseModel):
+    location: str = "Edmonton, AB"
+    count: int = 25
+
+
+@app.post("/api/v1/scrape")
+async def scrape_endpoint(body: ScrapeRequest, current_user: TokenPayload = Depends(get_current_user)):
+    """Scrape real property listings from Zillow and seed the database."""
+    try:
+        from hermes.scraper import scrape_and_seed
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        result = scrape_and_seed(
+            location=body.location,
+            count=max(body.count, 5),
+            db_url=db_url,
+        )
+        return {"status": "ok", **result}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "detail": str(e), "traceback": traceback.format_exc()}
+
+
+# ─── Calendar Events ─────────────────────────────────────────────────────
+
+
+class EventOut(BaseModel):
+    id: str
+    title: str
+    day: int
+    time: str
+    type: str
+    location: str
+    client: str
+    status: str
+
+
+@app.get("/api/v1/calendar/events")
+async def list_events(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """List calendar events from showings and activities."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        events = []
+
+        with Session(engine) as session:
+            # Showings → calendar events
+            showing_rows = session.execute(
+                text("SELECT id, lead_name, property_address, showing_time, status FROM showings ORDER BY showing_time LIMIT 20")
+            ).fetchall()
+
+            for row in showing_rows:
+                sid, lead_name, address, showing_time, status = row
+                # Parse day from showing_time
+                day = 0
+                time_str = "TBD"
+                if showing_time:
+                    try:
+                        dt = datetime.fromisoformat(str(showing_time).replace("Z", ""))
+                        day = dt.day
+                        time_str = dt.strftime("%I:%M %p")
+                    except (ValueError, TypeError):
+                        import re as _re
+                        day_match = _re.search(r"(\d{4})-(\d{2})-(\d{2})", str(showing_time))
+                        if day_match:
+                            day = int(day_match.group(3))
+
+                event_type_map = {
+                    "pending": "showing", "confirmed": "showing",
+                    "completed": "showing", "cancelled": "showing",
+                }
+
+                events.append({
+                    "id": str(sid),
+                    "title": f"Showing - {lead_name}" if lead_name else "Property Showing",
+                    "day": day or datetime.utcnow().day,
+                    "time": time_str,
+                    "type": event_type_map.get(str(status), "showing"),
+                    "location": address or "TBD",
+                    "client": lead_name or "Client",
+                    "status": status,
+                })
+
+        return {"events": events}
+    except Exception as e:
+        logger.warning(f"Calendar events error: {e}")
+        return {"events": []}
+
+
+# ─── Campaigns ───────────────────────────────────────────────────────────
+
+
+class CampaignOut(BaseModel):
+    id: str
+    name: str
+    status: str
+    type: str
+    sent: int = 0
+    opened: int = 0
+    responded: int = 0
+    audience: str = ""
+
+
+@app.get("/api/v1/campaigns")
+async def list_campaigns(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """List marketing campaigns."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            rows = session.execute(
+                text("SELECT id, name, audience, status, created_at FROM campaigns ORDER BY created_at DESC LIMIT 20")
+            ).fetchall()
+            campaigns = []
+            for row in rows:
+                cid, name, audience, status, created = row
+                # Infer type from name
+                name_lower = (name or "").lower()
+                ctype = "email"
+                if any(w in name_lower for w in ["social", "facebook", "instagram"]):
+                    ctype = "social"
+                elif any(w in name_lower for w in ["newsletter", "report"]):
+                    ctype = "newsletter"
+                campaigns.append({
+                    "id": str(cid),
+                    "name": name or "Untitled",
+                    "status": status or "draft",
+                    "type": ctype,
+                    "audience": audience or "",
+                    "sent": 0,  # Would need a tracking system
+                    "opened": 0,
+                    "responded": 0,
+                })
+            return {"campaigns": campaigns}
+    except Exception as e:
+        logger.warning(f"Campaigns list error: {e}")
+        return {"campaigns": []}
+
+
+# ─── Profile Update ──────────────────────────────────────────────────────
+
+
+class ProfileUpdate(BaseModel):
+    name: str = ""
+    email: str = ""
+    phone: str = ""
+    brokerage_name: str = ""
+    brokerage_phone: str = ""
+    license_number: str = ""
+
+
+@app.put("/api/v1/auth/profile")
+async def update_profile(body: ProfileUpdate, current_user: TokenPayload = Depends(get_current_user)):
+    """Update the current user's profile."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+
+        with Session(engine) as session:
+            # Update user name/email
+            if body.name:
+                session.execute(
+                    text("UPDATE users SET full_name = :name WHERE id = :uid"),
+                    {"name": body.name, "uid": current_user.sub},
+                )
+            if body.email:
+                session.execute(
+                    text("UPDATE users SET email = :email WHERE id = :uid"),
+                    {"email": body.email, "uid": current_user.sub},
+                )
+            # Update agent profile
+            if any([body.phone, body.brokerage_name, body.brokerage_phone, body.license_number]):
+                # Upsert agent profile
+                existing = session.execute(
+                    text("SELECT id FROM agent_profiles WHERE user_id = :uid"),
+                    {"uid": current_user.sub},
+                ).fetchone()
+                if existing:
+                    updates = []
+                    params = {"uid": current_user.sub}
+                    if body.phone:
+                        updates.append("phone = :phone")
+                        params["phone"] = body.phone
+                    if body.brokerage_name:
+                        updates.append("brokerage_name = :bn")
+                        params["bn"] = body.brokerage_name
+                    if body.brokerage_phone:
+                        updates.append("brokerage_phone = :bp")
+                        params["bp"] = body.brokerage_phone
+                    if body.license_number:
+                        updates.append("license_number = :ln")
+                        params["ln"] = body.license_number
+                    if updates:
+                        session.execute(
+                            text(f"UPDATE agent_profiles SET {', '.join(updates)} WHERE user_id = :uid"),
+                            params,
+                        )
+            session.commit()
+
+        return {"status": "saved", "message": "Profile updated successfully"}
+    except Exception as e:
+        logger.warning(f"Profile update error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update profile: {e}")
+
+
+# ─── Dashboard Recommendations ──────────────────────────────────────────
+
+
+class RecommendationOut(BaseModel):
+    title: str
+    description: str
+    priority: str  # high, medium, low
+    action: str  # what tool or action to suggest
+    category: str  # leads, listings, marketing, compliance
+
+
+@app.get("/api/v1/dashboard/recommendations")
+async def dashboard_recommendations(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Generate AI-powered recommendations based on current data."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            lead_count = session.execute(text("SELECT COUNT(*) FROM leads")).scalar() or 0
+            hot_leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE ai_score >= 80")).scalar() or 0
+            dormant_leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE status = 'DORMANT'")).scalar() or 0
+            active_listings = session.execute(text("SELECT COUNT(*) FROM properties WHERE status = 'ACTIVE'")).scalar() or 0
+            pending_listings = session.execute(text("SELECT COUNT(*) FROM properties WHERE status = 'PENDING'")).scalar() or 0
+            campaign_count = session.execute(text("SELECT COUNT(*) FROM campaigns WHERE status = 'active'")).scalar() or 0
+            recent_activities = session.execute(
+                text("SELECT COUNT(*) FROM activities WHERE created_at >= NOW() - INTERVAL '7 days'")
+            ).scalar() or 0
+    except Exception:
+        lead_count = hot_leads = dormant_leads = active_listings = 0
+        pending_listings = campaign_count = recent_activities = 0
+
+    recommendations = []
+
+    # Lead-based recommendations
+    if hot_leads > 0:
+        recommendations.append(RecommendationOut(
+            title=f"{hot_leads} hot lead{'s' if hot_leads > 1 else ''} ready to contact",
+            description=f"You have {hot_leads} lead{'s' if hot_leads > 1 else ''} with scores over 80. They're pre-qualified and ready for follow-up. Reach out today to maximize conversion.",
+            priority="high",
+            action="list_leads",
+            category="leads",
+        ))
+    if dormant_leads > 0:
+        recommendations.append(RecommendationOut(
+            title=f"{dormant_leads} dormant lead{'s' if dormant_leads > 1 else ''} need re-engagement",
+            description=f"Your pipeline has {dormant_leads} cold lead{'s' if dormant_leads > 1 else ''}. Consider a nurture campaign or warm email to re-engage them.",
+            priority="medium",
+            action="analyze_pipeline",
+            category="leads",
+        ))
+
+    # Listing-based recommendations
+    if active_listings > 0 and active_listings < 5:
+        recommendations.append(RecommendationOut(
+            title="Low active inventory",
+            description=f"You have {active_listings} active listings. Consider listing more properties to maintain pipeline momentum.",
+            priority="medium",
+            action="list_listings",
+            category="listings",
+        ))
+    if pending_listings > 0:
+        recommendations.append(RecommendationOut(
+            title=f"{pending_listings} pending listing{'s' if pending_listings > 1 else ''} to close",
+            description=f"You have {pending_listings} pending listing{'s' if pending_listings > 1 else ''}. Review timelines and prepare for closing.",
+            priority="high",
+            action="get_dashboard_summary",
+            category="listings",
+        ))
+
+    # Campaign recommendations
+    if campaign_count == 0:
+        recommendations.append(RecommendationOut(
+            title="No active campaigns",
+            description="You don't have any active marketing campaigns. Launch a campaign to nurture your leads and attract new clients.",
+            priority="low",
+            action="launch_campaign",
+            category="marketing",
+        ))
+
+    # General business health
+    if lead_count > 0 and active_listings == 0:
+        recommendations.append(RecommendationOut(
+            title="Leads without listings",
+            description=f"You have {lead_count} leads but no active listings. Consider adding properties to give your leads options.",
+            priority="medium",
+            action="get_dashboard_summary",
+            category="listings",
+        ))
+
+    # Health check
+    if recent_activities == 0:
+        recommendations.append(RecommendationOut(
+            title="No recent activity",
+            description="There's been no system activity in the last 7 days. Ask Athena for a full system overview to check on your business.",
+            priority="low",
+            action="system_overview",
+            category="listings",
+        ))
+
+    return {"recommendations": recommendations}
+
+
 @app.get("/api/v1/athena/memory")
 async def athena_memory(query: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Search Athena's memory (facts, conversations, notes)."""

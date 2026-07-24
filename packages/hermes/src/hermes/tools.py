@@ -124,6 +124,27 @@ TOOL_DEFINITIONS = [
         "description": "Extract all dates, deadlines, and time-sensitive clauses from a contract.",
         "parameters": {"contract_text": {"type": "string", "description": "The contract text to analyze", "required": True}}
     },
+    # ── Web Browsing Tools ────────────────────────────────────────────────
+    {
+        "name": "browse_web_page",
+        "description": "Read any web page and return its content. Uses Obscura headless browser, Jina Reader, or direct HTTP. Good for looking up real estate listings, market data, news, or any public web content.",
+        "parameters": {"url": {"type": "string", "description": "The full URL to browse (https://...)", "required": True}}
+    },
+    {
+        "name": "search_web",
+        "description": "Search the web using Exa semantic search engine. Returns ranked results with titles, URLs, and snippets. Good for researching market trends, finding properties, comparing prices, or any general web research.",
+        "parameters": {"query": {"type": "string", "description": "Search query", "required": True}, "count": {"type": "integer", "description": "Number of results (default 5)", "required": False}}
+    },
+    {
+        "name": "scrape_properties_advanced",
+        "description": "Advanced property scraping using ALL available sources: Zillow requests + Obscura headless browser + Browser-Use JS rendering + Agent-Reach web search. Gets more results and handles JS-heavy pages that simple requests miss.",
+        "parameters": {"location": {"type": "string", "description": "City/location to scrape (e.g. 'Edmonton, AB')", "required": True}, "max_results": {"type": "integer", "description": "Maximum listings (default 25)", "required": False}}
+    },
+    {
+        "name": "check_scraper_sources",
+        "description": "Check which web scraping tools are available on this system: requests (always), Obscura, Browser-Use, Agent-Reach. Shows what data sources Athena can access.",
+        "parameters": {}
+    },
 ]
 
 
@@ -209,6 +230,14 @@ def execute_tool(name: str, args: dict) -> str:
         return _summarize_contract(args.get("contract_text", ""))
     elif name == "extract_deadlines":
         return _extract_deadlines(args.get("contract_text", ""))
+    elif name == "browse_web_page":
+        return _browse_web_page(args.get("url", ""))
+    elif name == "search_web":
+        return _search_web(args.get("query", ""), args.get("count", 5))
+    elif name == "scrape_properties_advanced":
+        return _scrape_properties_advanced(args.get("location", ""), args.get("max_results", 25))
+    elif name == "check_scraper_sources":
+        return _check_scraper_sources()
     else:
         return f"Unknown tool: {name}"
 
@@ -879,6 +908,155 @@ def _run_crew(crew_name: str, input_data: str = "{}") -> str:
         )
 
 
+# ─── Web Browsing Tool Implementations ─────────────────────────────────────
+
+
+def _browse_web_page(url: str) -> str:
+    """Read a web page using the SuperScraper orchestrator.
+
+    Tries: Obscura fetch → Agent-Reach Jina Reader → direct HTTP.
+    """
+    if not url or not url.startswith(("http://", "https://")):
+        return "Please provide a valid URL starting with http:// or https://"
+
+    try:
+        from hermes.scraper.super_scraper import SuperScraper
+        scraper = SuperScraper()
+        text = scraper.web_read(url)
+        if text:
+            return f"**Web Page: {url}**\n\n{text[:6000]}"
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"SuperScraper web_read failed: {e}")
+
+    # Fallback: direct HTTP with BeautifulSoup
+    try:
+        import httpx
+        resp = httpx.get(url, timeout=15, follow_redirects=True,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        if resp.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for tag in soup(["script", "style", "nav", "footer", "header"]):
+                tag.decompose()
+            text = soup.get_text(separator="\n", strip=True)
+            return f"**Web Page: {url}**\n\n{text[:6000]}"
+        return f"HTTP {resp.status_code} from {url}"
+    except ImportError:
+        # Fallback without BeautifulSoup: just return raw text
+        try:
+            import httpx
+            resp = httpx.get(url, timeout=15, follow_redirects=True,
+                             headers={"User-Agent": "Mozilla/5.0"})
+            return resp.text[:6000]
+        except Exception as e2:
+            return f"Error reading {url}: {e2}"
+    except Exception as e:
+        return f"Error reading {url}: {e}"
+
+
+def _search_web(query: str, count: int = 5) -> str:
+    """Search the web using the best available search engine."""
+    if not query:
+        return "Please provide a search query"
+
+    results = []
+    try:
+        from hermes.scraper.agent_reach_source import AgentReachConnector
+        arc = AgentReachConnector()
+        if arc.is_available():
+            results = arc.search_web(query, count)
+        else:
+            results = arc._exa_direct(query, count)
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"AgentReach search failed: {e}")
+
+    if not results:
+        return f"No search results found for '{query}'"
+
+    output = f"**Web Search: {query}**\n\n"
+    for i, r in enumerate(results[:count], 1):
+        title = r.get("title", "Untitled")
+        url = r.get("url", "")
+        snippet = r.get("snippet", r.get("text", ""))[:250]
+        output += f"{i}. **[{title}]({url})**\n"
+        output += f"   {snippet}\n\n"
+
+    return output.strip()
+
+
+def _scrape_properties_advanced(location: str, max_results: int = 25) -> str:
+    """Advanced multi-source property scraping with ALL available tools."""
+    if not location:
+        return "Please provide a location (e.g. 'Edmonton, AB')"
+
+    try:
+        from hermes.scraper.super_scraper import SuperScraper
+        scraper = SuperScraper()
+        listings = scraper.search(location, max_results)
+    except ImportError:
+        return "SuperScraper module not available — use basic `list_listings` instead"
+    except Exception as e:
+        logger.warning(f"SuperScraper search failed: {e}")
+        listings = []
+
+    if not listings:
+        return f"No listings found for {location}"
+
+    # Count by source
+    sources = {}
+    for p in listings:
+        src = p.get("source", "unknown")
+        sources[src] = sources.get(src, 0) + 1
+
+    source_summary = " | ".join(f"{k}: {v}" for k, v in sources.items())
+
+    output = f"**Properties in {location}** ({len(listings)} total)\n"
+    output += f"Sources: {source_summary}\n\n"
+
+    for i, p in enumerate(listings[:10], 1):
+        output += f"{i}. **{p.get('address_street', 'N/A')}**\n"
+        output += f"   💰 ${p.get('list_price', 0):,} | 🛏️ {p.get('beds', 0)}bd | 🛁 {p.get('baths', 0)}ba | 📐 {p.get('sqft', 0)}sqft\n"
+        output += f"   Type: {p.get('property_type', 'N/A')} | Status: {p.get('status', 'N/A')}\n\n"
+
+    if len(listings) > 10:
+        output += f"... and {len(listings) - 10} more properties\n"
+
+    return output.strip()
+
+
+def _check_scraper_sources() -> str:
+    """Check which web scraping tools are available on this system."""
+    try:
+        from hermes.scraper.super_scraper import SuperScraper
+        scraper = SuperScraper()
+        status = scraper.check_availability()
+    except ImportError:
+        return "SuperScraper module not available"
+
+    output = "**Web Scraper Source Status**\n\n"
+    for name, available in status.items():
+        icon = "✅" if available else "❌"
+        output += f"  {icon} **{name}**\n"
+
+    output += "\n**Install missing tools:**\n"
+    if not status.get("obscura", False):
+        output += "  • Obscura (Rust headless browser): https://github.com/h4ckf0r0day/obscura\n"
+    if not status.get("browser_use", False):
+        output += "  • Browser-Use (Python): pip install browser-use && playwright install chromium\n"
+    if not status.get("agent_reach", False):
+        output += "  • Agent-Reach (platform connectivity): pip install agent-reach && agent-reach install --env=auto\n"
+
+    output += "\n**Hermes Browser Extension (Chrome side panel):**\n"
+    output += "  • https://github.com/abundantbeing/hermes-browser-extension\n"
+    output += "  • Adds real-time browser context capture to Athena"
+
+    return output
+
+
 def _system_overview() -> str:
     import psutil
     
@@ -914,13 +1092,14 @@ def _system_overview() -> str:
         f"  {profile[:300]}...\n\n"
         f"**Skills ({len(skills)}):**\n"
         + ("\n".join([f"  • {s['name']}: {s['description'][:60]}" for s in skills]) if skills else "  None yet — I'll create them as we work together.")
-        + "\n\n**Tools Available (16):**\n"
+        + "\n\n**Tools Available (20):**\n"
         f"  Leads: list, detail, update, search\n"
-        f"  Listings: list, describe, compare\n"
+        f"  Listings: list, describe, compare, scrape\n"
         f"  Marketing: campaigns, pipeline analysis\n"
         f"  Memory: remember, recall, notes\n"
         f"  System: overview, stats, crew execution\n"
         f"  Scheduling: showings\n"
+        f"  Web: browse pages, web search, advanced scraping\n"
         f"  Memory: SQLite + FTS5 + Markdown notes"
     )
     return result

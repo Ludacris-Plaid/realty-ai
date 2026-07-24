@@ -154,8 +154,33 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaved(true);
+    const token = localStorage.getItem("athena_token");
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+    try {
+      await fetch(`${API_BASE}/api/v1/auth/profile`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : "",
+        },
+        body: JSON.stringify({
+          name: `${firstName} ${lastName}`.trim(),
+          email,
+        }),
+      });
+    } catch { /* silent — localStorage save as fallback */ }
+    // Update localStorage too
+    try {
+      const raw = localStorage.getItem("athena_user");
+      if (raw) {
+        const u = JSON.parse(raw);
+        u.name = `${firstName} ${lastName}`.trim();
+        u.email = email;
+        localStorage.setItem("athena_user", JSON.stringify(u));
+      }
+    } catch { /* ignore */ }
     setTimeout(() => setSaved(false), 2000);
   };
 
