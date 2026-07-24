@@ -51,7 +51,7 @@ export function Hero() {
               transition={{ duration: 0.6, delay: 0.4 }}
               className="mt-5 text-lg leading-relaxed text-gray-600 max-w-[50ch]"
             >
-              Athena is your AI operating system for real estate — managing leads, listings, documents, and compliance through natural conversation. Stop juggling tools. Start closing deals.
+              Athena is your AI operating system for real estate — managing leads, listings, documents, and compliance through natural conversation. Fully compliant in Canada and the US. Stop juggling tools. Start closing deals.
             </motion.p>
 
             <motion.div
