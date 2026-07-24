@@ -112,7 +112,7 @@ async def register(body: UserCreate):
     if not user:
         raise HTTPException(status_code=500, detail="Failed to create user")
     
-    token, expires_in = create_access_token(user["id"], user["email"], brokerage_id=user.get("brokerage_id"))
+    token, expires_in = create_access_token(user["id"], user["email"], name=user.get("name", ""), brokerage_id=user.get("brokerage_id"))
     return {
         "user": UserResponse(
             id=user["id"],
@@ -135,7 +135,7 @@ async def login(body: UserLogin):
     if not await verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    token, expires_in = create_access_token(user["id"], user["email"], brokerage_id=user.get("brokerage_id"))
+    token, expires_in = create_access_token(user["id"], user["email"], name=user.get("name", ""), brokerage_id=user.get("brokerage_id"))
     return {
         "user": UserResponse(
             id=user["id"],

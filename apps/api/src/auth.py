@@ -26,6 +26,7 @@ _EMAIL_RE = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
 class TokenPayload(BaseModel):
     sub: str  # user_id
     email: str
+    name: str = ""
     brokerage_id: str | None = None
     exp: int
     iat: int
@@ -62,6 +63,7 @@ class UserResponse(BaseModel):
 def create_access_token(
     user_id: str,
     email: str,
+    name: str = "",
     brokerage_id: str | None = None,
     expires_delta: Optional[timedelta] = None,
 ) -> tuple[str, int]:
@@ -76,6 +78,7 @@ def create_access_token(
     payload = {
         "sub": user_id,
         "email": email,
+        "name": name,
         "brokerage_id": brokerage_id,
         "exp": exp,
         "iat": iat,
