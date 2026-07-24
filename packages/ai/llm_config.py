@@ -41,7 +41,7 @@ TIERS = [
     {  # 0: OpenCode Zen
         "base": lambda: _env("LLM_API_BASE", "https://opencode.ai/zen/v1"),
         "key":  lambda: _env("LLM_API_KEY", ""),
-        "model": lambda: _env("LLM_DEFAULT_MODEL", "hy3-free"),
+        "model": lambda: _env("LLM_DEFAULT_MODEL", "deepseek-v4-flash-free"),
     },
     {  # 1: 9router tunnel
         "base": lambda: _env("LLM_FALLBACK_API_BASE", ""),
@@ -69,13 +69,13 @@ MAX_TIER = len(TIERS) - 1
 
 # Model name overrides
 def get_fast_model() -> str:
-    return _env("LLM_DEFAULT_MODEL", "hy3-free")
+    return _env("LLM_DEFAULT_MODEL", "deepseek-v4-flash-free")
 
 def get_premium_model() -> str:
-    return _env("LLM_PREMIUM_MODEL", "hy3-free")
+    return _env("LLM_PREMIUM_MODEL", "mimo-v2.5-free")
 
 def get_local_model() -> str:
-    return _env("LLM_LOCAL_MODEL", "hy3-free")
+    return _env("LLM_LOCAL_MODEL", "deepseek-v4-flash-free")
 
 
 # ─── Tiered Fallback State ─────────────────────────────────────────────────────

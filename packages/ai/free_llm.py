@@ -72,7 +72,7 @@ FREE_PROVIDERS = [
         "name": "opencode-zen",
         "base": "https://opencode.ai/zen/v1",
         "key_env": "LLM_API_KEY",          # optional; zen works keyless
-        "model": "hy3-free",
+        "model": "deepseek-v4-flash-free",
         "keyless": True,
         "note": "Primary free tier (Novita upstream). No key required.",
     },

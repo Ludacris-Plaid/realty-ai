@@ -143,7 +143,7 @@ class AthenaAgent:
         self.agent_id = "athena-main"
         self.user_name = None
         self.session_id = str(uuid.uuid4())
-        self.model_name = model_name or os.environ.get("ATHENA_MODEL", "hy3-free")
+        self.model_name = model_name or os.environ.get("ATHENA_MODEL", "deepseek-v4-flash-free")
         self.conversation_count = 0
         
         # Resume or start a persistent conversation thread
@@ -647,7 +647,7 @@ def get_athena(db_engine=None) -> AthenaAgent:
     """Get or create the singleton Athena agent instance."""
     global _instance, _migration_done
     if _instance is None:
-        model = os.environ.get("ATHENA_MODEL", "hy3-free")
+        model = os.environ.get("ATHENA_MODEL", "deepseek-v4-flash-free")
         _instance = AthenaAgent(db_engine=db_engine, model_name=model)
         # One-time migration of existing SQLite facts into Mem0
         if not _migration_done and mem0_available():
