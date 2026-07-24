@@ -712,6 +712,17 @@ class AthenaAgent:
         self.user_id = ""
         self.conversation_id = str(uuid.uuid4())
         
+        # 4. Create a fresh conversation thread in the DB
+        from .memory import _engine
+        from sqlalchemy import text
+        from sqlalchemy.orm import Session
+        with Session(_engine) as s:
+            s.execute(text("""
+                INSERT INTO athena_conv_threads (id, user_id, title, is_active)
+                VALUES (:id, '', 'Chat', TRUE)
+            """), {"id": self.conversation_id})
+            s.commit()
+        
         logger.info("Athena memory reset complete — fresh slate")
         return {"status": "reset", "conversation_id": self.conversation_id}
 
