@@ -61,10 +61,6 @@ def _ensure_tables():
             )
         """))
         conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_athena_conv_threads_user
-                ON athena_conv_threads(user_id, is_active, created_at)
-        """))
-        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS athena_chat_messages (
                 id              SERIAL PRIMARY KEY,
                 conversation_id TEXT NOT NULL REFERENCES athena_conv_threads(id),
@@ -75,7 +71,7 @@ def _ensure_tables():
             )
         """))
         conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_athena_conv_created
+            CREATE INDEX IF NOT EXISTS ix_athena_chat_created
                 ON athena_chat_messages(conversation_id, created_at)
         """))
         # Add user_id column to existing tables if missing (migration)
@@ -89,6 +85,10 @@ def _ensure_tables():
                 """))
             except Exception:
                 pass  # Some dialects don't support IF NOT EXISTS — ignore
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_athena_conv_threads_user
+                ON athena_conv_threads(user_id, is_active, created_at)
+        """))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS athena_conversations (
                 id           TEXT PRIMARY KEY,
