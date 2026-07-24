@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 @theme {
+  /* Geist font via CSS variables */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
   /* Athena brand — warm amber/gold */
   --color-brand-50: #fffbeb;
   --color-brand-100: #fef3c7;
@@ -20,6 +24,11 @@
   --animate-in: enter 200ms ease-out;
   --animate-out: exit 200ms ease-in;
   --animate-float: float 3s ease-in-out infinite;
+}
+
+/* Smooth scroll for anchor links */
+html {
+  scroll-behavior: smooth;
 }
 
 @keyframes enter {
