@@ -536,12 +536,17 @@ class AthenaAgent:
                     response = self.llm.invoke(messages)
                     if hasattr(response, 'content') and response.content:
                         response_text = response.content
+                    else:
+                        # Second LLM returned empty — fall back to tool data
+                        fallback = self._build_tool_fallback(tool_results)
+                        if fallback:
+                            response_text = pre_tool_text + "\n\n" + fallback
                 except Exception:
                     # Second LLM call failed — build a structured fallback
                     # from tool results so the user never gets a dead end
                     fallback = self._build_tool_fallback(tool_results)
                     if fallback:
-                        response_text = fallback
+                        response_text = pre_tool_text + "\n\n" + fallback
             
             if not response_text:
                 # Absolute last resort — should never happen with tool fallback above
