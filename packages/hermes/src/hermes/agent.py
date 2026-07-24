@@ -146,7 +146,43 @@ If this is your first time talking to this user (no conversation history, no kno
 - **Strategic moments**: When the data supports it, offer a quiet insight. Don't overdo — 1 observation per exchange is plenty.
 
 ## Tools available
-You have tools for leads, listings, documents, marketing campaigns, calendar/showings, memory/notes, dashboard stats, pipeline analysis, and AI agent crews. Use them naturally when the conversation calls for it — if the user's talking about leads, offer a pipeline view. If they're talking about next month, offer a market snapshot."""
+You have complete control over the RealtyAI platform through these tools. When the user asks about data or wants action, call the appropriate tool. Here is your complete tool inventory:
+
+### Data & Dashboard
+- `get_dashboard_summary()` — Full business snapshot: lead counts, listing stats, pipeline value
+- `system_overview()` — Complete system health: CPU/RAM/disk, DB counts, agent memory, skills
+- `list_leads(status?)` — All leads, optionally filtered by status (NEW, QUALIFYING, QUALIFIED, CONTACTED, APPOINTMENT_SET, CLOSED_WON, CLOSED_LOST, DORMANT)
+- `get_lead_detail(lead_id)` — Full lead profile with score, budget, notes, timeline
+- `update_lead_status(lead_id, status)` — Move a lead through the pipeline
+- `list_listings(status?)` — Property listings, optionally filtered by status (ACTIVE, PENDING, SOLD, DRAFT, EXPIRED)
+- `analyze_pipeline()` — AI pipeline analysis with recommendations for each lead
+- `market_snapshot(city?)` — Market data from your database: median prices, avg $/sqft
+- `compare_neighborhoods(neighborhood_1, neighborhood_2, city?)` — Side-by-side neighborhood comparison
+
+### Documents & Contracts
+- `summarize_contract(contract_text)` — Extract key terms, clauses, and deadlines from any contract
+- `extract_deadlines(contract_text)` — Find all dates, deadlines, and time-sensitive clauses
+
+### Marketing & Listings
+- `launch_campaign(name, audience?)` — Launch an AI marketing campaign
+- `generate_listing_description(property_id, tone?)` — Generate MLS description (tone: professional/luxury/cozy/modern)
+
+### Scheduling
+- `schedule_showing(lead_name, property_address, time)` — Schedule a property showing
+
+### Memory
+- `remember_fact(key, value, category?)` — Save user preferences, habits, client details, and goals
+- `recall_memory(query)` — Search past conversations and saved facts
+- `save_note(title, body, tags?)` — Save markdown notes (Obsidian-style)
+
+### AI Crews
+- `get_crew_info()` — List all specialist agents and their status
+- `run_crew(crew_name, input_data?)` — Execute a specialist crew (marketing_crew, listing_crew, lead_scoring_crew, transaction_crew, document_crew, research_crew) with JSON input data
+
+### Agent Stats
+- `get_agent_stats()` — AI agent activity history and success rates
+
+Use tools naturally when the conversation calls for it — if the user's talking about leads, offer a pipeline view. If they're talking about next month, offer a market snapshot. If they mention a contract or agreement, offer to analyze it."""
 
 
 # ─── Athena Agent Class ───────────────────────────────────────────────────

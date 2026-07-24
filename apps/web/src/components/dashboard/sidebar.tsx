@@ -28,6 +28,8 @@ const navItems = [
   { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
   { label: "Docs", href: "/docs", icon: Book },
+  // Logout — renders as button, not link
+  { label: "Logout", href: "#logout", icon: LogOut, logout: true },
 ];
 
 export function Sidebar() {
@@ -86,21 +88,39 @@ export function Sidebar() {
         {navItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
           const isAthena = item.highlight;
+          const isLogout = item.logout;
+
+          const linkClasses = cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
+            collapsed && "justify-center px-2",
+            // Active state
+            isActive && isAthena && "bg-amber-600 text-white shadow-[0_0_16px_rgba(245,158,11,0.25)]",
+            isActive && !isAthena && !isLogout && "bg-gray-800 text-white",
+            // Inactive state
+            !isActive && isAthena && "text-amber-300/70 hover:bg-amber-600/10 hover:text-amber-200",
+            !isActive && !isAthena && isLogout && "text-gray-500 hover:text-red-400 hover:bg-gray-800",
+            !isActive && !isAthena && !isLogout && "text-gray-400 hover:bg-gray-800 hover:text-white",
+          );
+
+          if (isLogout) {
+            return (
+              <button
+                key={item.href}
+                onClick={handleLogout}
+                className={linkClasses}
+                title="Log out"
+              >
+                <LogOut className={cn("h-5 w-5 shrink-0")} />
+                {!collapsed && <span>Log out</span>}
+              </button>
+            );
+          }
 
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                collapsed && "justify-center px-2",
-                // Active state
-                isActive && isAthena && "bg-amber-600 text-white shadow-[0_0_16px_rgba(245,158,11,0.25)]",
-                isActive && !isAthena && "bg-gray-800 text-white",
-                // Inactive state
-                !isActive && isAthena && "text-amber-300/70 hover:bg-amber-600/10 hover:text-amber-200",
-                !isActive && !isAthena && "text-gray-400 hover:bg-gray-800 hover:text-white",
-              )}
+              className={linkClasses}
             >
               <item.icon className={cn(
                 "h-5 w-5 shrink-0 transition-transform",
@@ -121,7 +141,7 @@ export function Sidebar() {
 
       <Separator className="bg-gray-800" />
 
-      {/* User profile + logout */}
+      {/* User profile — logout moved to nav */}
       <div className={cn("p-4 space-y-2", collapsed && "flex flex-col items-center")}>
         <div className={cn("flex items-center gap-3", collapsed && "flex-col")}>
           <Avatar
@@ -136,17 +156,6 @@ export function Sidebar() {
             </div>
           )}
         </div>
-        <button
-          onClick={handleLogout}
-          className={cn(
-            "flex items-center gap-2 rounded-lg text-xs text-gray-400 hover:text-red-400 hover:bg-gray-800 transition-colors",
-            collapsed ? "justify-center p-2" : "w-full px-3 py-1.5"
-          )}
-          title="Log out"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          {!collapsed && <span>Log out</span>}
-        </button>
       </div>
     </div>
   );
