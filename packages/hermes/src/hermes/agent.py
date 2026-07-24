@@ -139,11 +139,15 @@ You have tools for leads, listings, documents, marketing campaigns, calendar/sho
 class AthenaAgent:
     """Your personal digital secretary — learns, grows, and runs the show."""
     
+    # Models known to be dead/unsupported — swap to working free model
+    _DEAD_MODELS = {"hy3-free", "hy3"}
+
     def __init__(self, db_engine=None, model_name: str = None):
         self.agent_id = "athena-main"
         self.user_name = None
         self.session_id = str(uuid.uuid4())
-        self.model_name = model_name or os.environ.get("ATHENA_MODEL", "deepseek-v4-flash-free")
+        _raw = model_name or os.environ.get("ATHENA_MODEL", "deepseek-v4-flash-free")
+        self.model_name = "deepseek-v4-flash-free" if _raw in self._DEAD_MODELS else _raw
         self.conversation_count = 0
         
         # Resume or start a persistent conversation thread
@@ -648,6 +652,8 @@ def get_athena(db_engine=None) -> AthenaAgent:
     global _instance, _migration_done
     if _instance is None:
         model = os.environ.get("ATHENA_MODEL", "deepseek-v4-flash-free")
+        if model in AthenaAgent._DEAD_MODELS:
+            model = "deepseek-v4-flash-free"
         _instance = AthenaAgent(db_engine=db_engine, model_name=model)
         # One-time migration of existing SQLite facts into Mem0
         if not _migration_done and mem0_available():
