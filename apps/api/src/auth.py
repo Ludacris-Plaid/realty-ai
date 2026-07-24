@@ -26,6 +26,7 @@ _EMAIL_RE = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
 class TokenPayload(BaseModel):
     sub: str  # user_id
     email: str
+    brokerage_id: str | None = None
     exp: int
     iat: int
     scope: str = "user"
@@ -52,6 +53,7 @@ class UserResponse(BaseModel):
     id: str
     email: str
     name: str
+    brokerage_id: str | None = None
     created_at: datetime
 
 
@@ -60,6 +62,7 @@ class UserResponse(BaseModel):
 def create_access_token(
     user_id: str,
     email: str,
+    brokerage_id: str | None = None,
     expires_delta: Optional[timedelta] = None,
 ) -> tuple[str, int]:
     """Create a JWT access token. Returns (token, expires_in_seconds)."""
@@ -73,6 +76,7 @@ def create_access_token(
     payload = {
         "sub": user_id,
         "email": email,
+        "brokerage_id": brokerage_id,
         "exp": exp,
         "iat": iat,
         "scope": "user",
@@ -121,7 +125,7 @@ async def get_user_by_email(email: str) -> Optional[dict]:
         
         with Session(engine) as session:
             result = session.execute(
-                text("SELECT id, email, full_name, password_hash, created_at FROM users WHERE email = :email"),
+                text("SELECT id, email, full_name, password_hash, brokerage_id, created_at FROM users WHERE email = :email"),
                 {"email": email}
             ).first()
             
@@ -131,6 +135,7 @@ async def get_user_by_email(email: str) -> Optional[dict]:
                     "email": result.email,
                     "name": result.full_name,
                     "password_hash": result.password_hash,
+                    "brokerage_id": str(result.brokerage_id) if result.brokerage_id else None,
                     "created_at": result.created_at,
                 }
     except Exception as e:
@@ -142,11 +147,11 @@ async def get_user_by_email(email: str) -> Optional[dict]:
 async def create_user(email: str, password: str, name: str) -> Optional[dict]:
     """Create a new user in the database."""
     import uuid
-    from passlib.context import CryptContext
-    
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    password_hash = pwd_context.hash(password)
+    import bcrypt
+
+    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     user_id = str(uuid.uuid4())
+    brokerage_id = str(uuid.uuid4())
     
     try:
         from sqlalchemy import create_engine, text
@@ -158,14 +163,15 @@ async def create_user(email: str, password: str, name: str) -> Optional[dict]:
         with Session(engine) as session:
             session.execute(
                 text("""
-                    INSERT INTO users (id, email, full_name, password_hash, created_at)
-                    VALUES (:id, :email, :full_name, :password_hash, NOW())
+                    INSERT INTO users (id, email, full_name, password_hash, role, is_active, brokerage_id, created_at, updated_at)
+                    VALUES (:id, :email, :full_name, :password_hash, 'AGENT', true, :brokerage_id, NOW(), NOW())
                 """),
                 {
                     "id": user_id,
                     "email": email,
                     "full_name": name,
                     "password_hash": password_hash,
+                    "brokerage_id": brokerage_id,
                 }
             )
             session.commit()
@@ -174,6 +180,7 @@ async def create_user(email: str, password: str, name: str) -> Optional[dict]:
             "id": user_id,
             "email": email,
             "name": name,
+            "brokerage_id": brokerage_id,
             "created_at": datetime.utcnow(),
         }
     except Exception as e:
@@ -184,9 +191,8 @@ async def create_user(email: str, password: str, name: str) -> Optional[dict]:
 
 async def verify_password(plain_password: str, password_hash: str) -> bool:
     """Verify a plain password against a hash."""
-    from passlib.context import CryptContext
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    return pwd_context.verify(plain_password, password_hash)
+    import bcrypt
+    return bcrypt.checkpw(plain_password.encode("utf-8"), password_hash.encode("utf-8"))
 
 
 # ─── FastAPI Security Dependency ──────────────────────────────────────────────

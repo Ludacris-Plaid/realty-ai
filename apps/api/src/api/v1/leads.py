@@ -2,17 +2,16 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db import engine
+from ...auth import TokenPayload
+from .deps import require_user, optional_user
 
 router = APIRouter()
-
-DEFAULT_AGENT_ID = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
-DEFAULT_ORG_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 
 
 class LeadCreate(BaseModel):
@@ -80,7 +79,7 @@ _COLUMNS = """
 
 
 @router.get("/stats")
-def lead_pipeline_stats():
+def lead_pipeline_stats(current_user: Optional[TokenPayload] = Depends(optional_user)):
     with Session(engine) as session:
         by_status = session.execute(
             text("SELECT status, COUNT(*)::int AS cnt FROM leads GROUP BY status ORDER BY cnt DESC")
@@ -111,6 +110,7 @@ def list_leads(
     status: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    current_user: Optional[TokenPayload] = Depends(optional_user),
 ):
     query = f"SELECT {_COLUMNS} FROM leads WHERE 1=1"
     params = {}
@@ -132,22 +132,27 @@ def list_leads(
 
 
 @router.get("/{lead_id}")
-def get_lead(lead_id: str):
-    with Session(engine) as session:
-        row = session.execute(
-            text(f"SELECT {_COLUMNS} FROM leads WHERE id = :id"),
-            {"id": lead_id},
-        ).fetchone()
-
+def get_lead(lead_id: str, current_user: Optional[TokenPayload] = Depends(optional_user)):
+    row = _fetch_lead(lead_id)
     if not row:
         raise HTTPException(status_code=404, detail="Lead not found")
     return _row_to_dict(row)
 
 
+def _fetch_lead(lead_id: str):
+    with Session(engine) as session:
+        return session.execute(
+            text(f"SELECT {_COLUMNS} FROM leads WHERE id = :id"),
+            {"id": lead_id},
+        ).fetchone()
+
+
 @router.post("/", status_code=201)
-def create_lead(data: LeadCreate):
+def create_lead(data: LeadCreate, current_user: TokenPayload = Depends(require_user)):
     lead_id = str(uuid.uuid4())
     now = datetime.utcnow()
+    agent_id = current_user.sub
+    brokerage_id = current_user.brokerage_id or agent_id
 
     with Session(engine) as session:
         session.execute(
@@ -167,8 +172,8 @@ def create_lead(data: LeadCreate):
             """),
             {
                 "id": lead_id,
-                "agent_id": DEFAULT_AGENT_ID,
-                "brokerage_id": DEFAULT_ORG_ID,
+                "agent_id": agent_id,
+                "brokerage_id": brokerage_id,
                 "first_name": data.first_name,
                 "last_name": data.last_name,
                 "email": data.email,
@@ -187,11 +192,11 @@ def create_lead(data: LeadCreate):
         )
         session.commit()
 
-    return get_lead(lead_id)
+    return _row_to_dict(_fetch_lead(lead_id))
 
 
 @router.put("/{lead_id}")
-def update_lead(lead_id: str, data: LeadUpdate):
+def update_lead(lead_id: str, data: LeadUpdate, current_user: TokenPayload = Depends(require_user)):
     fields = data.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -225,11 +230,12 @@ def update_lead(lead_id: str, data: LeadUpdate):
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    return get_lead(lead_id)
+    row = _fetch_lead(lead_id)
+    return _row_to_dict(row) if row else {"id": lead_id}
 
 
 @router.delete("/{lead_id}")
-def delete_lead(lead_id: str):
+def delete_lead(lead_id: str, current_user: TokenPayload = Depends(require_user)):
     with Session(engine) as session:
         result = session.execute(
             text("DELETE FROM leads WHERE id = :id"),
@@ -249,7 +255,7 @@ class ScoreResponse(BaseModel):
 
 
 @router.patch("/{lead_id}/score")
-def rescore_lead(lead_id: str):
+def rescore_lead(lead_id: str, current_user: TokenPayload = Depends(require_user)):
     with Session(engine) as session:
         row = session.execute(
             text("""

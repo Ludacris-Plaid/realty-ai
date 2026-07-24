@@ -112,12 +112,13 @@ async def register(body: UserCreate):
     if not user:
         raise HTTPException(status_code=500, detail="Failed to create user")
     
-    token, expires_in = create_access_token(user["id"], user["email"])
+    token, expires_in = create_access_token(user["id"], user["email"], brokerage_id=user.get("brokerage_id"))
     return {
         "user": UserResponse(
             id=user["id"],
             email=user["email"],
             name=user["name"],
+            brokerage_id=user.get("brokerage_id"),
             created_at=user["created_at"],
         ),
         "token": TokenResponse(access_token=token, expires_in=expires_in),
@@ -134,12 +135,13 @@ async def login(body: UserLogin):
     if not await verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    token, expires_in = create_access_token(user["id"], user["email"])
+    token, expires_in = create_access_token(user["id"], user["email"], brokerage_id=user.get("brokerage_id"))
     return {
         "user": UserResponse(
             id=user["id"],
             email=user["email"],
             name=user["name"],
+            brokerage_id=user.get("brokerage_id"),
             created_at=user["created_at"],
         ),
         "token": TokenResponse(access_token=token, expires_in=expires_in),
@@ -155,7 +157,7 @@ async def me(current_user = Depends(get_current_user)):
 # ─── AI ──────────────────────────────────────────────────────────────────────
 
 @app.post("/ai", response_model=AIResponse)
-async def ai_endpoint(query: AIQuery):
+async def ai_endpoint(query: AIQuery, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Primary AI endpoint. Routes through the Supervisor to the right specialist.
     
     The supervisor classifies intent and routes to:
@@ -182,7 +184,7 @@ async def ai_endpoint(query: AIQuery):
 # ─── Briefing ────────────────────────────────────────────────────────────────
 
 @app.get("/briefing")
-async def daily_briefing():
+async def daily_briefing(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     return {
         "text": generate_briefing(),
         "data": get_briefing_data(),
@@ -192,7 +194,7 @@ async def daily_briefing():
 # ─── Supervisor ──────────────────────────────────────────────────────────────
 
 @app.get("/supervisor/route")
-async def test_route(message: str = "Who are my hottest leads?"):
+async def test_route(message: str = "Who are my hottest leads?", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Test what the supervisor would route a message to."""
     decision = route(message)
     intent = classify_intent(message)
@@ -204,7 +206,7 @@ async def test_route(message: str = "Who are my hottest leads?"):
 
 
 @app.get("/supervisor/agents")
-async def list_agents():
+async def list_agents(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """List all available specialist agents."""
     return {
         "agents": [
@@ -217,13 +219,13 @@ async def list_agents():
 # ─── Activity Feed ───────────────────────────────────────────────────────────
 
 @app.get("/activity")
-async def activity_feed(limit: int = 20):
+async def activity_feed(limit: int = 20, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Get the AI activity feed — every action the AI took."""
     return {"activities": get_recent_activities(limit)}
 
 
 @app.get("/activity/stats")
-async def activity_stats():
+async def activity_stats(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Get aggregate AI activity statistics."""
     return get_activity_stats()
 
@@ -231,25 +233,26 @@ async def activity_stats():
 # ─── Human Approval ──────────────────────────────────────────────────────────
 
 @app.get("/approvals/pending")
-async def pending_approvals():
+async def pending_approvals(current_user: TokenPayload = Depends(get_current_user)):
     """Get all actions awaiting human approval."""
     return {"approvals": get_pending_approvals()}
 
 
 @app.post("/approvals/{approval_id}/approve")
-async def approve(approval_id: str, body: ApprovalAction):
+async def approve(approval_id: str, body: ApprovalAction, current_user: TokenPayload = Depends(get_current_user)):
     """Approve a pending AI action."""
     result = approve_action(approval_id, reviewer=body.reviewer, notes=body.notes)
     if not result:
         raise HTTPException(status_code=404, detail="Approval not found or already reviewed")
-    record_activity("Human", f"Approved: {result.get('summary', '')[:80]}", status="approved")
+    record_activity("Human", f"Approved: {result.get('summary', '')[:80]}", status="approved",
+                    organization_id=current_user.brokerage_id, user_id=current_user.sub)
     return {"status": "approved", "approval": result}
 
 
 # ─── Database Seed Endpoint ────────────────────────────────────────────────────
 
 @app.post("/api/v1/seed")
-async def seed_database():
+async def seed_database(current_user: TokenPayload = Depends(get_current_user)):
     """Seed the database with demo data for new users/organizations."""
     try:
         from sqlalchemy import create_engine, text
@@ -400,12 +403,13 @@ async def seed_database():
 
 
 @app.post("/approvals/{approval_id}/reject")
-async def reject(approval_id: str, body: ApprovalAction):
+async def reject(approval_id: str, body: ApprovalAction, current_user: TokenPayload = Depends(get_current_user)):
     """Reject a pending AI action."""
     result = reject_action(approval_id, reviewer=body.reviewer, reason=body.notes)
     if not result:
         raise HTTPException(status_code=404, detail="Approval not found or already reviewed")
-    record_activity("Human", f"Rejected: {result.get('summary', '')[:80]}", status="rejected")
+    record_activity("Human", f"Rejected: {result.get('summary', '')[:80]}", status="rejected",
+                    organization_id=current_user.brokerage_id, user_id=current_user.sub)
     return {"status": "rejected", "approval": result}
 
 
@@ -439,14 +443,14 @@ async def athena_chat(query: AIQuery, current_user: Optional[TokenPayload] = Dep
 
 
 @app.get("/api/v1/athena/state")
-async def athena_state():
+async def athena_state(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Get Athena agent internal state — skills, memory, profile."""
     agent = _get_athena()
     return {"agent": agent.get_state(), "tools": TOOL_DEFINITIONS}
 
 
 @app.get("/api/v1/athena/memory")
-async def athena_memory(query: str = ""):
+async def athena_memory(query: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Search Athena's memory (facts, conversations, notes)."""
     if not query:
         return {"profile": profile_summary(), "skills": get_skills()}
@@ -457,7 +461,7 @@ async def athena_memory(query: str = ""):
 
 
 @app.get("/api/v1/athena/system-overview")
-async def athena_system_overview():
+async def athena_system_overview(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Full system overview — all counts, health, agent state."""
     try:
         from sqlalchemy import create_engine
@@ -508,13 +512,13 @@ async def athena_system_overview():
 # ─── Persistent Conversation Endpoints ────────────────────────────────────
 
 @app.get("/api/v1/athena/conversations")
-async def list_athena_conversations():
+async def list_athena_conversations(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """List all past conversation threads."""
     return {"conversations": list_mem_conversations()}
 
 
 @app.get("/api/v1/athena/conversations/current")
-async def get_current_conversation():
+async def get_current_conversation(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Get active conversation with its messages."""
     agent = _get_athena()
     messages = get_mem_conversation_messages(agent.conversation_id)
@@ -522,14 +526,14 @@ async def get_current_conversation():
 
 
 @app.get("/api/v1/athena/conversations/{conv_id}/messages")
-async def get_conversation_messages_endpoint(conv_id: str):
+async def get_conversation_messages_endpoint(conv_id: str, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Get all messages for a specific conversation."""
     messages = get_mem_conversation_messages(conv_id)
     return {"conversation_id": conv_id, "messages": messages}
 
 
 @app.post("/api/v1/athena/conversations/new")
-async def new_conversation():
+async def new_conversation(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Start a fresh conversation. The old one is preserved and can be reviewed later."""
     agent = _get_athena()
     new_id = agent.new_conversation()
@@ -595,7 +599,7 @@ async def slack_events(request: Request):
 
 
 @app.post("/api/v1/athena/telegram/set-webhook")
-async def telegram_set_webhook():
+async def telegram_set_webhook(current_user: TokenPayload = Depends(get_current_user)):
     """Register the Telegram webhook URL (called once during setup)."""
     try:
         from bots.telegram import set_webhook
@@ -619,7 +623,7 @@ async def telegram_set_webhook():
 
 
 @app.get("/api/v1/athena/bots/status")
-async def bot_status():
+async def bot_status(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Check which bot integrations are configured (env vars + DB)."""
     from bots.telegram import is_configured as tg_configured
     from bots.slack import is_configured as slack_configured
@@ -659,14 +663,14 @@ class BotConfigRequest(BaseModel):
 
 
 @app.post("/api/v1/athena/bots/config")
-async def set_bot_config(req: BotConfigRequest):
+async def set_bot_config(req: BotConfigRequest, current_user: TokenPayload = Depends(get_current_user)):
     """Save bot configuration tokens (Telegram, Slack, etc.)."""
     save_bot_config(req.platform, req.config, req.enabled)
     return {"ok": True, "platform": req.platform, "enabled": req.enabled}
 
 
 @app.delete("/api/v1/athena/bots/config/{platform}")
-async def remove_bot_config(platform: str):
+async def remove_bot_config(platform: str, current_user: TokenPayload = Depends(get_current_user)):
     """Delete bot configuration for a platform."""
     delete_bot_config(platform)
     return {"ok": True, "platform": platform}
@@ -678,7 +682,7 @@ async def remove_bot_config(platform: str):
 
 
 @app.get("/api/v1/athena/memories")
-async def list_memories(limit: int = 50):
+async def list_memories(limit: int = 50, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """List all Mem0 memories. Used for the memory dashboard."""
     if not mem0_available():
         return {"memories": [], "count": 0, "enabled": False}
@@ -687,7 +691,7 @@ async def list_memories(limit: int = 50):
 
 
 @app.get("/api/v1/athena/memories/search")
-async def search_memories(query: str = "", limit: int = 10):
+async def search_memories(query: str = "", limit: int = 10, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Semantic search across memories."""
     if not query or not mem0_available():
         return {"memories": [], "count": 0}
@@ -696,7 +700,7 @@ async def search_memories(query: str = "", limit: int = 10):
 
 
 @app.delete("/api/v1/athena/memories/{memory_id}")
-async def delete_memory(memory_id: str):
+async def delete_memory(memory_id: str, current_user: TokenPayload = Depends(get_current_user)):
     """Delete a specific memory by ID."""
     if not mem0_available():
         return {"ok": False, "error": "Mem0 not available"}
@@ -705,7 +709,7 @@ async def delete_memory(memory_id: str):
 
 
 @app.get("/api/v1/athena/memories/count")
-async def memory_count():
+async def memory_count(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Get the count of stored memories."""
     if not mem0_available():
         return {"count": 0, "enabled": False}

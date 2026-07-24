@@ -1,20 +1,21 @@
 import uuid
 import os
+import sys
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db import engine
+from ...auth import TokenPayload
+from .deps import require_user, optional_user
 
 router = APIRouter()
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "uploads", "documents")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-DEFAULT_AGENT_ID = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
 
 
 def _row_to_dict(r):
@@ -46,7 +47,7 @@ _COLUMNS = """
 
 
 @router.get("/")
-def list_documents(property_id: Optional[str] = None, category: Optional[str] = None):
+def list_documents(property_id: Optional[str] = None, category: Optional[str] = None, current_user: Optional[TokenPayload] = Depends(optional_user)):
     query = f"SELECT {_COLUMNS} FROM documents WHERE 1=1"
     params = {}
     if property_id:
@@ -64,16 +65,19 @@ def list_documents(property_id: Optional[str] = None, category: Optional[str] = 
 
 
 @router.get("/{doc_id}")
-def get_document(doc_id: str):
-    with Session(engine) as session:
-        row = session.execute(
-            text(f"SELECT {_COLUMNS} FROM documents WHERE id = :id"),
-            {"id": doc_id},
-        ).fetchone()
-
+def get_document(doc_id: str, current_user: Optional[TokenPayload] = Depends(optional_user)):
+    row = _fetch_doc(doc_id)
     if not row:
         raise HTTPException(status_code=404, detail="Document not found")
     return _row_to_dict(row)
+
+
+def _fetch_doc(doc_id: str):
+    with Session(engine) as session:
+        return session.execute(
+            text(f"SELECT {_COLUMNS} FROM documents WHERE id = :id"),
+            {"id": doc_id},
+        ).fetchone()
 
 
 @router.post("/upload", status_code=201)
@@ -84,6 +88,7 @@ async def upload_document(
     category: Optional[str] = Form("other"),
     title: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
+    current_user: TokenPayload = Depends(require_user),
 ):
     doc_id = str(uuid.uuid4())
     ext = os.path.splitext(file.filename or "unknown")[1] or ""
@@ -106,7 +111,7 @@ async def upload_document(
             """),
             {
                 "id": doc_id,
-                "agent_id": DEFAULT_AGENT_ID,
+                "agent_id": current_user.sub,
                 "property_id": property_id,
                 "client_id": client_id,
                 "filename": file.filename or safe_filename,
@@ -120,11 +125,11 @@ async def upload_document(
         )
         session.commit()
 
-    return get_document(doc_id)
+    return _row_to_dict(_fetch_doc(doc_id))
 
 
 @router.delete("/{doc_id}")
-def delete_document(doc_id: str):
+def delete_document(doc_id: str, current_user: TokenPayload = Depends(require_user)):
     with Session(engine) as session:
         row = session.execute(
             text("SELECT file_path FROM documents WHERE id = :id"),
@@ -147,7 +152,7 @@ def delete_document(doc_id: str):
 
 
 @router.post("/{doc_id}/extract")
-def extract_document_text(doc_id: str):
+def extract_document_text(doc_id: str, current_user: TokenPayload = Depends(require_user)):
     with Session(engine) as session:
         row = session.execute(
             text("SELECT file_path, content_type FROM documents WHERE id = :id"),
@@ -190,7 +195,7 @@ class AskRequest(BaseModel):
 
 
 @router.post("/{doc_id}/ask")
-def ask_document(doc_id: str, body: AskRequest):
+def ask_document(doc_id: str, body: AskRequest, current_user: TokenPayload = Depends(require_user)):
     with Session(engine) as session:
         row = session.execute(
             text("SELECT filename, extracted_text FROM documents WHERE id = :id"),

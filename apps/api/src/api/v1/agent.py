@@ -1,10 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "packages", "ai"))
 
 from agent import ask
 from router import get_router_stats, classify_task
+
+from ...auth import TokenPayload
+from .deps import require_user, optional_user
 
 router = APIRouter()
 
@@ -22,7 +25,7 @@ class AgentResponse(BaseModel):
 
 
 @router.post("/chat", response_model=AgentResponse)
-async def agent_chat(query: AgentQuery):
+async def agent_chat(query: AgentQuery, current_user: TokenPayload = Depends(require_user)):
     """Send a natural language request to the RealtyAI agent.
     
     The message is automatically routed to the best model:
@@ -59,14 +62,14 @@ class RouterInfo(BaseModel):
 
 
 @router.get("/router", response_model=RouterInfo)
-async def router_info():
+async def router_info(current_user: Optional[TokenPayload] = Depends(optional_user)):
     """Return the current model router configuration."""
     stats = get_router_stats()
     return RouterInfo(**stats)
 
 
 @router.get("/classify")
-async def classify(message: str):
+async def classify(message: str, current_user: Optional[TokenPayload] = Depends(optional_user)):
     """Classify what model a message would be routed to."""
     model = classify_task(message)
     return {"message_preview": message[:100], "routed_to": model}

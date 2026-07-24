@@ -65,9 +65,17 @@ NINEROUTER_UPSTREAMS = [
 
 
 # ─── Free Provider Registry ───────────────────────────────────────────────────
-# Order = priority. 9router (local keyless + keyed tunnel) comes first because
-# we want to MAX it out. `keyless`/`key_optional` providers join with no key.
+# Order = priority. opencode-zen is primary (keyless, always available).
+# 9router and other providers are fallbacks.
 FREE_PROVIDERS = [
+    {
+        "name": "opencode-zen",
+        "base": "https://opencode.ai/zen/v1",
+        "key_env": "LLM_API_KEY",          # optional; zen works keyless
+        "model": "hy3-free",
+        "keyless": True,
+        "note": "Primary free tier (Novita upstream). No key required.",
+    },
     {
         "name": "9router",
         # Keyless local proxy (fastest, always up where the proxy runs).
@@ -79,15 +87,7 @@ FREE_PROVIDERS = [
         "models": NINEROUTER_UPSTREAMS,
         "keyless": False,
         "key_optional": True,   # include even with no key (local :20128 is keyless)
-        "note": "Self-hosted multi-upstream proxy. MAX THIS OUT. Keyless on localhost:20128; keyed on the tunnel.",
-    },
-    {
-        "name": "opencode-zen",
-        "base": "https://opencode.ai/zen/v1",
-        "key_env": "LLM_API_KEY",          # optional; zen works keyless
-        "model": "hy3-free",
-        "keyless": True,
-        "note": "Primary keyless free tier (Novita upstream). Always available anchor.",
+        "note": "Self-hosted multi-upstream proxy. Fallback. Keyless on localhost:20128; keyed on the tunnel.",
     },
     {
         "name": "nvidia",

@@ -20,25 +20,30 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-# Default IDs until auth is implemented
-_DEFAULT_ORG_ID = os.environ.get("DEFAULT_ORG_ID", "00000000-0000-0000-0000-000000000001")
-_DEFAULT_USER_ID = os.environ.get("DEFAULT_USER_ID", "00000000-0000-0000-0000-000000000002")
-
 # In-memory fallback (used only when DB is down)
 _activities: list[dict] = []
 
-# DB module — lazy import to avoid circular deps at module level
-_db = None
 
-def _get_db():
-    global _db
-    if _db is None:
-        try:
-            from db import record_activity_in_db, get_recent_activities_from_db
-            _db = {"record": record_activity_in_db, "list": get_recent_activities_from_db}
-        except Exception:
-            pass
-    return _db
+def _record_in_db(organization_id: str, user_id: str, agent_name: str,
+                  action: str, intent: str = "general",
+                  model_used: str = "fast-model", status: str = "success",
+                  metadata: Optional[dict] = None) -> Optional[str]:
+    """Try to record activity in PostgreSQL. Returns activity_id or None."""
+    try:
+        from db import record_activity_in_db
+        return record_activity_in_db(
+            organization_id=organization_id,
+            user_id=user_id,
+            agent_name=agent_name,
+            action=action,
+            intent=intent,
+            model_used=model_used,
+            status=status,
+            metadata=metadata,
+        )
+    except Exception as e:
+        logger.warning(f"DB activity record failed: {e}")
+        return None
 
 
 def record_activity(
@@ -48,26 +53,27 @@ def record_activity(
     model_used: str = "fast-model",
     status: str = "success",
     metadata: Optional[dict] = None,
+    organization_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> str:
     """Record an AI activity entry. Persists to PostgreSQL, falls back to in-memory.
     
     Returns the activity ID.
     """
-    db = _get_db()
-    if db:
-        try:
-            return db["record"](
-                organization_id=_DEFAULT_ORG_ID,
-                user_id=_DEFAULT_USER_ID,
-                agent_name=agent_name,
-                action=action,
-                intent=intent,
-                model_used=model_used,
-                status=status,
-                metadata=metadata,
-            )
-        except Exception as e:
-            logger.warning(f"DB activity record failed, using in-memory fallback: {e}")
+    # Try DB first
+    if organization_id and user_id:
+        result = _record_in_db(
+            organization_id=organization_id,
+            user_id=user_id,
+            agent_name=agent_name,
+            action=action,
+            intent=intent,
+            model_used=model_used,
+            status=status,
+            metadata=metadata,
+        )
+        if result:
+            return result
 
     # Fallback: in-memory
     activity_id = str(uuid.uuid4())
@@ -87,46 +93,77 @@ def record_activity(
     return activity_id
 
 
-def get_recent_activities(limit: int = 20) -> list[dict]:
+def _list_from_db(limit: int = 20, organization_id: Optional[str] = None) -> Optional[list[dict]]:
+    """Try to list activities from PostgreSQL. Returns list or None."""
+    try:
+        from db import get_recent_activities_from_db
+        return get_recent_activities_from_db(limit=limit, organization_id=organization_id)
+    except Exception as e:
+        logger.warning(f"DB activity list failed: {e}")
+        return None
+
+
+def get_recent_activities(limit: int = 20, organization_id: Optional[str] = None) -> list[dict]:
     """Return the most recent AI activities from PostgreSQL (fallback to in-memory)."""
-    db = _get_db()
-    if db:
-        try:
-            return db["list"](limit=limit, organization_id=_DEFAULT_ORG_ID)
-        except Exception as e:
-            logger.warning(f"DB activity list failed, using in-memory fallback: {e}")
+    result = _list_from_db(limit=limit, organization_id=organization_id)
+    if result is not None:
+        return result
     return _activities[:limit]
 
 
-def get_activities_by_agent(agent_name: str, limit: int = 20) -> list[dict]:
+def get_activities_by_agent(agent_name: str, limit: int = 20, organization_id: Optional[str] = None) -> list[dict]:
     """Return activities for a specific agent. Falls back to in-memory if DB unavailable."""
-    db = _get_db()
-    if db:
-        try:
-            all_activities = db["list"](limit=100, organization_id=_DEFAULT_ORG_ID)
-            return [a for a in all_activities if a.get("agent_name") == agent_name][:limit]
-        except Exception:
-            pass
+    result = _list_from_db(limit=100, organization_id=organization_id)
+    if result is not None:
+        return [a for a in result if a.get("agent_name") == agent_name][:limit]
     return [a for a in _activities if a["agent_name"] == agent_name][:limit]
+
+
+def _stats_from_db(organization_id: Optional[str] = None) -> Optional[dict]:
+    """Get activity stats from PostgreSQL via SQL aggregation."""
+    try:
+        from db import _get_db_engine
+        from sqlalchemy import text
+        from sqlalchemy.orm import Session
+
+        engine = _get_db_engine()
+        if not engine:
+            return None
+
+        with Session(engine) as session:
+            total = session.execute(
+                text("SELECT COUNT(*)::int FROM activities")
+            ).scalar() or 0
+
+            by_agent_rows = session.execute(
+                text("""
+                    SELECT agent_name, COUNT(*)::int AS cnt
+                    FROM activities
+                    GROUP BY agent_name
+                    ORDER BY cnt DESC
+                """)
+            ).fetchall()
+
+            last_24h = session.execute(
+                text("""
+                    SELECT COUNT(*)::int FROM activities
+                    WHERE created_at >= NOW() - INTERVAL '24 hours'
+                """)
+            ).scalar() or 0
+
+        return {
+            "total_actions": total,
+            "by_agent": {r[0]: r[1] for r in by_agent_rows},
+            "last_24h": last_24h,
+        }
+    except Exception as e:
+        logger.warning(f"DB activity stats failed: {e}")
+        return None
 
 
 def get_activity_stats() -> dict:
     """Return aggregate stats about AI activity from PostgreSQL (fallback to in-memory)."""
-    db = _get_db()
-    if db:
-        try:
-            all_activities = db["list"](limit=500, organization_id=_DEFAULT_ORG_ID)
-            if all_activities:
-                by_agent = {}
-                for a in all_activities:
-                    name = a.get("agent_name", "unknown")
-                    by_agent[name] = by_agent.get(name, 0) + 1
-                return {
-                    "total_actions": len(all_activities),
-                    "by_agent": by_agent,
-                    "last_24h": 0,  # timestamp-based filtering TBD
-                }
-        except Exception:
-            pass
-
+    result = _stats_from_db()
+    if result is not None:
+        return result
     return {"total_actions": 0, "by_agent": {}, "last_24h": 0}

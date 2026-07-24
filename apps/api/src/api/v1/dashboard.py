@@ -1,14 +1,18 @@
-from fastapi import APIRouter
+from typing import Optional
+from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db import engine
+from ...auth import TokenPayload
+from .deps import optional_user
+
 
 router = APIRouter()
 
 
 @router.get("/summary")
-def dashboard_summary():
+def dashboard_summary(current_user: Optional[TokenPayload] = Depends(optional_user)):
     with Session(engine) as session:
         lead_stats = session.execute(text("""
             SELECT

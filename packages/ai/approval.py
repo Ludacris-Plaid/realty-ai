@@ -22,27 +22,35 @@ logger = logging.getLogger(__name__)
 # In-memory fallback (used when DB is unavailable)
 _pending_approvals: list[dict] = []
 
-# DB module — lazy import
-_db = None
 
-def _get_db():
-    global _db
-    if _db is None:
-        try:
-            from db import (
-                create_approval_in_db, get_pending_approvals_from_db,
-                approve_in_db, reject_in_db, get_approval_history_from_db,
-            )
-            _db = {
-                "create": create_approval_in_db,
-                "pending": get_pending_approvals_from_db,
-                "approve": approve_in_db,
-                "reject": reject_in_db,
-                "history": get_approval_history_from_db,
-            }
-        except Exception:
-            pass
-    return _db
+def _try_db(call_name: str, *args, **kwargs) -> tuple[bool, any]:
+    """Try a DB operation. Returns (success, result).
+    
+    Each attempt re-imports the db module so transient failures
+    (e.g. DB restart) don't permanently disable DB mode.
+    """
+    try:
+        if call_name == "create":
+            from db import create_approval_in_db
+            result = create_approval_in_db(*args, **kwargs)
+        elif call_name == "pending":
+            from db import get_pending_approvals_from_db
+            result = get_pending_approvals_from_db(*args, **kwargs)
+        elif call_name == "approve":
+            from db import approve_in_db
+            result = approve_in_db(*args, **kwargs)
+        elif call_name == "reject":
+            from db import reject_in_db
+            result = reject_in_db(*args, **kwargs)
+        elif call_name == "history":
+            from db import get_approval_history_from_db
+            result = get_approval_history_from_db(*args, **kwargs)
+        else:
+            return False, None
+        return True, result
+    except Exception as e:
+        logger.warning(f"DB approval {call_name} failed: {e}")
+        return False, None
 
 
 def request_approval(
@@ -64,12 +72,9 @@ def request_approval(
     Returns:
         Approval request ID.
     """
-    db = _get_db()
-    if db:
-        try:
-            return db["create"](action_type, summary, details, agent_name, requires_human)
-        except Exception as e:
-            logger.warning(f"DB approval create failed, using in-memory: {e}")
+    ok, result = _try_db("create", action_type, summary, details, agent_name, requires_human)
+    if ok:
+        return result
 
     approval_id = str(uuid.uuid4())
     entry = {
@@ -90,12 +95,9 @@ def request_approval(
 
 def approve(approval_id: str, reviewer: str = "Agent", notes: Optional[str] = None) -> Optional[dict]:
     """Approve a pending action. Returns the entry or None if not found."""
-    db = _get_db()
-    if db:
-        try:
-            return db["approve"](approval_id, reviewer, notes)
-        except Exception as e:
-            logger.warning(f"DB approve failed, using in-memory: {e}")
+    ok, result = _try_db("approve", approval_id, reviewer, notes)
+    if ok:
+        return result
     
     for entry in _pending_approvals:
         if entry["id"] == approval_id and entry["status"] == "pending":
@@ -109,12 +111,9 @@ def approve(approval_id: str, reviewer: str = "Agent", notes: Optional[str] = No
 
 def reject(approval_id: str, reviewer: str = "Agent", reason: Optional[str] = None) -> Optional[dict]:
     """Reject a pending action. Returns the entry or None if not found."""
-    db = _get_db()
-    if db:
-        try:
-            return db["reject"](approval_id, reviewer, reason)
-        except Exception as e:
-            logger.warning(f"DB reject failed, using in-memory: {e}")
+    ok, result = _try_db("reject", approval_id, reviewer, reason)
+    if ok:
+        return result
     
     for entry in _pending_approvals:
         if entry["id"] == approval_id and entry["status"] == "pending":
@@ -128,29 +127,22 @@ def reject(approval_id: str, reviewer: str = "Agent", reason: Optional[str] = No
 
 def get_pending_approvals() -> list[dict]:
     """Return all actions awaiting human approval from PostgreSQL (fallback to in-memory)."""
-    db = _get_db()
-    if db:
-        try:
-            return db["pending"]()
-        except Exception as e:
-            logger.warning(f"DB pending approvals failed, using in-memory: {e}")
+    ok, result = _try_db("pending")
+    if ok:
+        return result
     return [a for a in _pending_approvals if a["status"] == "pending"]
 
 
 def get_approval_history(limit: int = 20) -> list[dict]:
     """Return recent approval decisions from PostgreSQL (fallback to in-memory)."""
-    db = _get_db()
-    if db:
-        try:
-            return db["history"](limit=limit)
-        except Exception as e:
-            logger.warning(f"DB approval history failed, using in-memory: {e}")
+    ok, result = _try_db("history", limit=limit)
+    if ok:
+        return result
     return _pending_approvals[:limit]
 
 
 def execute_action(approval_id: str) -> Optional[dict]:
     """Mark an approved action as executed."""
-    # Note: DB-backed execute_action can be added when needed
     for entry in _pending_approvals:
         if entry["id"] == approval_id and entry["status"] == "approved":
             entry["status"] = "executed"

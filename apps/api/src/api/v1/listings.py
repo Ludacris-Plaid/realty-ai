@@ -1,18 +1,19 @@
 import uuid
+import os
+import sys
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .db import engine
+from ...auth import TokenPayload
+from .deps import require_user, optional_user
 
 router = APIRouter()
-
-DEFAULT_AGENT_ID = "b2c3d4e5-f6a7-8901-bcde-f12345678901"
-DEFAULT_ORG_ID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 
 
 class ListingCreate(BaseModel):
@@ -110,6 +111,7 @@ def list_listings(
     min_price: Optional[float] = Query(None),
     max_price: Optional[float] = Query(None),
     beds: Optional[int] = Query(None),
+    current_user: Optional[TokenPayload] = Depends(optional_user),
 ):
     query = f"SELECT {_COLUMNS} FROM properties WHERE 1=1"
     params = {}
@@ -137,22 +139,28 @@ def list_listings(
 
 
 @router.get("/{listing_id}")
-def get_listing(listing_id: str):
-    with Session(engine) as session:
-        row = session.execute(
-            text(f"SELECT {_COLUMNS} FROM properties WHERE id = :id"),
-            {"id": listing_id},
-        ).fetchone()
-
+def get_listing(listing_id: str, current_user: Optional[TokenPayload] = Depends(optional_user)):
+    row = _fetch_listing(listing_id)
     if not row:
         raise HTTPException(status_code=404, detail="Listing not found")
     return _row_to_dict(row)
 
 
+def _fetch_listing(listing_id: str):
+    with Session(engine) as session:
+        return session.execute(
+            text(f"SELECT {_COLUMNS} FROM properties WHERE id = :id"),
+            {"id": listing_id},
+        ).fetchone()
+
+
 @router.post("/", status_code=201)
-def create_listing(data: ListingCreate):
+def create_listing(data: ListingCreate, current_user: TokenPayload = Depends(require_user)):
     listing_id = str(uuid.uuid4())
     now = datetime.utcnow()
+    agent_id = current_user.sub
+    brokerage_id = current_user.brokerage_id or agent_id
+
     with Session(engine) as session:
         session.execute(
             text("""
@@ -173,8 +181,8 @@ def create_listing(data: ListingCreate):
             """),
             {
                 "id": listing_id,
-                "agent_id": DEFAULT_AGENT_ID,
-                "brokerage_id": DEFAULT_ORG_ID,
+                "agent_id": agent_id,
+                "brokerage_id": brokerage_id,
                 "client_id": data.client_id,
                 "street": data.address_street,
                 "city": data.address_city,
@@ -201,11 +209,11 @@ def create_listing(data: ListingCreate):
         )
         session.commit()
 
-    return get_listing(listing_id)
+    return _row_to_dict(_fetch_listing(listing_id))
 
 
 @router.put("/{listing_id}")
-def update_listing(listing_id: str, data: ListingUpdate):
+def update_listing(listing_id: str, data: ListingUpdate, current_user: TokenPayload = Depends(require_user)):
     fields = data.model_dump(exclude_none=True)
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -242,11 +250,12 @@ def update_listing(listing_id: str, data: ListingUpdate):
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Listing not found")
 
-    return get_listing(listing_id)
+    row = _fetch_listing(listing_id)
+    return _row_to_dict(row) if row else {"id": listing_id}
 
 
 @router.delete("/{listing_id}")
-def delete_listing(listing_id: str):
+def delete_listing(listing_id: str, current_user: TokenPayload = Depends(require_user)):
     with Session(engine) as session:
         result = session.execute(
             text("DELETE FROM properties WHERE id = :id"),
@@ -265,7 +274,7 @@ class DescriptionRequest(BaseModel):
 
 
 @router.post("/{listing_id}/generate-description")
-def generate_listing_description(listing_id: str, req: DescriptionRequest):
+def generate_listing_description(listing_id: str, req: DescriptionRequest, current_user: TokenPayload = Depends(require_user)):
     with Session(engine) as session:
         row = session.execute(
             text("SELECT address_street, address_city, address_state, beds, baths, sqft, list_price, description, features, property_type, mls_number FROM properties WHERE id = :id"),

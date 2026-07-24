@@ -21,6 +21,14 @@ DB_URL = os.getenv(
 engine = create_engine(DB_URL, echo=False)
 
 
+def _get_db_engine():
+    """Return the shared SQLAlchemy engine. Returns None if not available."""
+    try:
+        return engine
+    except Exception:
+        return None
+
+
 # ─── Lead Queries ──────────────────────────────────────────────────────────────
 
 def get_hot_leads_from_db(limit: int = 5) -> list[dict]:
