@@ -435,10 +435,20 @@ def _get_athena():
 async def athena_chat(query: AIQuery, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Chat with Athena — your digital secretary. She controls the entire system via natural language."""
     agent = _get_athena()
-    result = agent.chat(query.message)
-    # Associate the authenticated user (if any) for proactive features / personalization
+    user_name = current_user.name if current_user else ""
+    user_id = current_user.sub if current_user else ""
+    result = agent.chat(query.message, user_name=user_name, user_id=user_id)
+    # Associate the authenticated user for proactive features / personalization
     if isinstance(result, dict):
-        result.setdefault("user_id", current_user.sub if current_user else None)
+        result.setdefault("user_id", user_id)
+    return result
+
+
+@app.post("/api/v1/athena/reset-memory")
+async def athena_reset_memory(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Factory reset — wipe all Athena memories, facts, conversations, and Mem0 data. Fresh slate."""
+    agent = _get_athena()
+    result = agent.reset_memory()
     return result
 
 

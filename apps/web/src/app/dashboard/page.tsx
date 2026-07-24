@@ -102,6 +102,17 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [userName, setUserName] = useState("");
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("athena_user");
+      if (raw) {
+        const u = JSON.parse(raw);
+        setUserName(u.name || u.full_name || u.email || "");
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   useEffect(() => {
     getDashboardSummary()
@@ -113,9 +124,9 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">
-          {greeting()}, Sarah <span className="ml-1">👋</span>
-        </h1>
+<h1 className="text-2xl font-bold text-gray-900">
+              {greeting()}{userName ? `, ${userName}` : ""} <span className="ml-1">👋</span>
+            </h1>
         <p className="mt-1 text-sm text-gray-500">Here&apos;s your AI-powered business overview</p>
       </div>
 

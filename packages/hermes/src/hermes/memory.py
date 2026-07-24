@@ -53,11 +53,16 @@ def _ensure_tables():
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS athena_conv_threads (
                 id          TEXT PRIMARY KEY,
+                user_id     TEXT NOT NULL DEFAULT '',
                 title       TEXT DEFAULT '',
                 is_active   BOOLEAN DEFAULT TRUE,
                 created_at  TIMESTAMPTZ DEFAULT NOW(),
                 updated_at  TIMESTAMPTZ DEFAULT NOW()
             )
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_athena_conv_threads_user
+                ON athena_conv_threads(user_id, is_active, created_at)
         """))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS athena_chat_messages (
@@ -70,9 +75,20 @@ def _ensure_tables():
             )
         """))
         conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_athena_chat_conv_created
+            CREATE INDEX IF NOT EXISTS ix_athena_conv_created
                 ON athena_chat_messages(conversation_id, created_at)
         """))
+        # Add user_id column to existing tables if missing (migration)
+        for tbl in ["athena_conv_threads", "athena_facts", "athena_chat_messages", "athena_conversations", "athena_notes"]:
+            try:
+                conn.execute(text(f"""
+                    DO $$ BEGIN
+                        ALTER TABLE {tbl} ADD COLUMN user_id TEXT NOT NULL DEFAULT '';
+                    EXCEPTION WHEN duplicate_column THEN NULL;
+                    END $$;
+                """))
+            except Exception:
+                pass  # Some dialects don't support IF NOT EXISTS — ignore
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS athena_conversations (
                 id           TEXT PRIMARY KEY,
@@ -207,19 +223,20 @@ def _search_facts(query: str, limit: int = 10) -> list[dict]:
 
 # ─── Conversation Threads & Messages ─────────────────────────────────────────
 
-def get_or_create_active_conversation() -> str:
+def get_or_create_active_conversation(user_id: str = "") -> str:
     with Session(_engine) as s:
         row = s.execute(text("""
             SELECT id FROM athena_conv_threads
-            WHERE is_active = TRUE ORDER BY created_at DESC LIMIT 1
-        """)).fetchone()
+            WHERE user_id = :uid AND is_active = TRUE
+            ORDER BY created_at DESC LIMIT 1
+        """), {"uid": user_id}).fetchone()
         if row:
             return row[0]
         conv_id = str(uuid.uuid4())
         s.execute(text("""
-            INSERT INTO athena_conv_threads (id, title, is_active)
-            VALUES (:id, 'Chat', TRUE)
-        """), {"id": conv_id})
+            INSERT INTO athena_conv_threads (id, user_id, title, is_active)
+            VALUES (:id, :uid, 'Chat', TRUE)
+        """), {"id": conv_id, "uid": user_id})
         s.commit()
         return conv_id
 
@@ -249,7 +266,7 @@ def get_conversation_messages(conversation_id: str, limit: int = 200) -> list[di
     ]
 
 
-def list_conversations(limit: int = 50) -> list[dict]:
+def list_conversations(user_id: str = "", limit: int = 50) -> list[dict]:
     with Session(_engine) as s:
         rows = s.execute(text("""
             SELECT ct.id, ct.title, ct.is_active, ct.created_at,
@@ -262,10 +279,11 @@ def list_conversations(limit: int = 50) -> list[dict]:
                    ) AS last_msg
             FROM athena_conv_threads ct
             LEFT JOIN athena_chat_messages cm ON cm.conversation_id = ct.id
+            WHERE ct.user_id = :uid
             GROUP BY ct.id, ct.title, ct.is_active, ct.created_at
             ORDER BY ct.created_at DESC
             LIMIT :lim
-        """), {"lim": limit}).fetchall()
+        """), {"uid": user_id, "lim": limit}).fetchall()
     return [
         {
             "id": r[0], "title": r[1], "is_active": bool(r[2]),
@@ -287,17 +305,18 @@ def update_conversation_title(conversation_id: str, title: str):
         s.commit()
 
 
-def reset_conversation() -> str:
+def reset_conversation(user_id: str = "") -> str:
     """Mark active conversation inactive and start a fresh one. Returns new ID."""
     conv_id = str(uuid.uuid4())
     with Session(_engine) as s:
         s.execute(text("""
-            UPDATE athena_conv_threads SET is_active = FALSE WHERE is_active = TRUE
-        """))
+            UPDATE athena_conv_threads SET is_active = FALSE
+            WHERE user_id = :uid AND is_active = TRUE
+        """), {"uid": user_id})
         s.execute(text("""
-            INSERT INTO athena_conv_threads (id, title, is_active)
-            VALUES (:id, 'Chat', TRUE)
-        """), {"id": conv_id})
+            INSERT INTO athena_conv_threads (id, user_id, title, is_active)
+            VALUES (:id, :uid, 'Chat', TRUE)
+        """), {"id": conv_id, "uid": user_id})
         s.commit()
     return conv_id
 

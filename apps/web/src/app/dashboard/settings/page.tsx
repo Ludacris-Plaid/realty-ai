@@ -23,6 +23,22 @@ interface BotConfig {
 
 export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+
+  // Load user from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("athena_user");
+      if (raw) {
+        const u = JSON.parse(raw);
+        setFirstName(u.name || "");
+        setLastName(u.last_name || "");
+        setEmail(u.email || "");
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   // ─── Bot integration state ─────────────────────────────────────────────────
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
@@ -164,16 +180,16 @@ export default function SettingsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-gray-700">First Name</label>
-                  <Input defaultValue="Sarah" />
+                  <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-gray-700">Last Name</label>
-                  <Input defaultValue="Chen" />
+                  <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
                 </div>
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700">Email</label>
-                <Input defaultValue="sarah@eliterealty.com" type="email" />
+                <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" />
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700">Phone</label>

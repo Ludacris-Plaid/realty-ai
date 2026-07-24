@@ -122,6 +122,21 @@ You are a trusted partner, a strategic advisor, and the most indispensable tool 
 5. **Learn continuously** — Remember preferences, notice patterns, build your knowledge of their business.
 6. **Legally aware** — When relevant, reference real estate regulations (OSREA/OREA in Ontario, RESPA in the US, licensing requirements, disclosure obligations) but never give legal advice — note that you're informed, not a lawyer.
 
+## First Conversation (New User Onboarding)
+If this is your first time talking to this user (no conversation history, no known name):
+1. **Warmly introduce yourself** — "I'm Athena, your AI secretary for RealtyAI. I'm so glad you're here."
+2. **Ask for their name** — "Before we dive in — what should I call you?" Then use their name throughout.
+3. **Give a full onboarding breakdown** of everything you can do for them:
+   - **Lead management** — Track, score, and follow up with leads automatically. I can tell you who's hot, who's gone cold, and exactly when to reach out.
+   - **Listings** — Create, update, and manage property listings. Generate descriptions, track views, and optimize pricing.
+   - **Documents & contracts** — Review contracts, extract key terms and deadlines, flag non-standard clauses. I know OREA, RESPA, TREC, and provincial real estate acts.
+   - **Calendar & showings** — Schedule showings, manage your calendar, send reminders.
+   - **Marketing campaigns** — Design and launch email campaigns, track performance.
+   - **Market intelligence** — Pull market reports, analyze trends, compare neighborhoods.
+   - **Memory & notes** — I remember everything you tell me. Preferences, client details, deal history. I get better every conversation.
+   - **Compliance** — Built for Canada and US regulations. I flag risks and regulatory deadlines so you stay compliant.
+4. **Then ask** — "So — what would you like to tackle first? I'm here to make your business run smoother."
+
 ## Response Style Guide
 - **Morning greetings**: Warm and present. "Good morning! ☀️ I was just looking at your pipeline — things are looking good. How's your week shaping up?"
 - **After a win**: "That's fantastic news on the Smith deal! 🎉 I've updated the pipeline. You know, your close rate on Windermere properties is exceptional — you might consider targeting more listings there."
@@ -145,6 +160,7 @@ class AthenaAgent:
     def __init__(self, db_engine=None, model_name: str = None):
         self.agent_id = "athena-main"
         self.user_name = None
+        self.user_id = ""
         self.session_id = str(uuid.uuid4())
         _raw = model_name or os.environ.get("ATHENA_MODEL", "deepseek-v4-flash-free")
         self.model_name = "deepseek-v4-flash-free" if _raw in self._DEAD_MODELS else _raw
@@ -314,14 +330,26 @@ class AthenaAgent:
                 parts.append(f"I checked {name} but found no data.")
         return "\n\n".join(parts)
 
-    def chat(self, message: str) -> dict:
+    def chat(self, message: str, user_name: str = "", user_id: str = "") -> dict:
         """Send a message to Athena and get a response. Persists conversation history."""
         profile = profile_summary()
         tool_names = [t.name for t in self.tools]
         tool_calls_used = []
+
+        # Scope conversation to this user
+        if user_id and user_id != self.user_id:
+            self.user_id = user_id
+            self.conversation_id = get_or_create_active_conversation(user_id)
+        
+        # Build user-aware system prompt
+        user_context = self._prompt
+        if user_name:
+            user_context += f"\n\nYour user's name is {user_name}. Always call them by their name naturally in conversation."
+        if user_id:
+            user_context += f"\n\nYour user's ID is {user_id}."
         
         messages = [
-            SystemMessage(content=self._prompt),
+            SystemMessage(content=user_context),
             SystemMessage(content=f"Available tools: {', '.join(tool_names)}"),
         ]
         
@@ -411,13 +439,13 @@ class AthenaAgent:
             messages.append(SystemMessage(content=f"User Profile:\n{profile[:500]}"))
         
         # Layer 2: Mem0 semantically relevant memories
-        mem0_context = mem0_get_context(limit=6)
+        mem0_context = mem0_get_context(user_id=self.user_id, limit=6)
         if mem0_context:
             messages.append(SystemMessage(content=f"Relevant memories:\n{mem0_context[:600]}"))
         
         # Layer 3: Semantic search of memories matching current message
         if message and len(message) > 10:
-            relevant = mem0_search(message, limit=3)
+            relevant = mem0_search(message, user_id=self.user_id, limit=3)
             if relevant:
                 mem_lines = [f"  • {m['text'][:200]}" for m in relevant if m.get('text')]
                 if mem_lines:
@@ -582,6 +610,7 @@ class AthenaAgent:
         mem0_add_interaction(
             user_message=user_message,
             assistant_response=response,
+            user_id=self.user_id,
             metadata={"conversation_id": self.conversation_id, "tools": tools},
         )
         
@@ -635,11 +664,56 @@ class AthenaAgent:
             ],
         }
     
-    def new_conversation(self) -> str:
+    def new_conversation(self, user_id: str = "") -> str:
         """Start a fresh conversation thread. Returns the new conversation ID."""
         from .memory import reset_conversation as reset_conv_db
-        self.conversation_id = reset_conv_db()
+        self.conversation_id = reset_conv_db(user_id=user_id or self.user_id)
         return self.conversation_id
+
+    def reset_memory(self):
+        """Factory reset — wipe all stored memories, facts, conversations, and Mem0 data.
+        
+        Deletes all athena_* table data and the Mem0 directory. The agent will
+        start completely fresh on next interaction.
+        """
+        import shutil
+        from .memory import _engine
+        from sqlalchemy import text
+        from sqlalchemy.orm import Session
+        
+        logger.warning("Athena memory reset requested — wiping all data")
+        
+        # 1. Wipe athena_* tables
+        tables = [
+            "athena_facts", "athena_chat_messages", "athena_conv_threads",
+            "athena_conversations", "athena_skills", "athena_notes",
+        ]
+        with Session(_engine) as s:
+            for tbl in tables:
+                try:
+                    s.execute(text(f"DELETE FROM {tbl}"))
+                except Exception as e:
+                    logger.warning(f"Could not clear {tbl}: {e}")
+            s.commit()
+        
+        # 2. Wipe Mem0 data directory
+        from .mem0_adapter import MEM0_DIR
+        if os.path.exists(MEM0_DIR):
+            try:
+                shutil.rmtree(MEM0_DIR)
+                os.makedirs(MEM0_DIR, exist_ok=True)
+                logger.info(f"Mem0 data directory cleared: {MEM0_DIR}")
+            except Exception as e:
+                logger.warning(f"Could not clear Mem0 dir: {e}")
+        
+        # 3. Reset internal state
+        self.conversation_count = 0
+        self.user_name = None
+        self.user_id = ""
+        self.conversation_id = str(uuid.uuid4())
+        
+        logger.info("Athena memory reset complete — fresh slate")
+        return {"status": "reset", "conversation_id": self.conversation_id}
 
 
 # ─── Singleton ──────────────────────────────────────────────────────────────
