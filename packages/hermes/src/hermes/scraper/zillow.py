@@ -131,7 +131,7 @@ class ZillowScraper:
                 "beds": max(beds, 1),
                 "baths": max(baths, 1),
                 "sqft": max(sqft, 500),
-                "property_type": "Single Family",
+                "property_type": "single_family",
                 "status": "active",
                 "year_built": 0,
                 "lot_size": 0,
