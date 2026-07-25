@@ -44,6 +44,7 @@ def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
     import json
     aid = agent_id or str(uuid.uuid4())
     with engine.connect() as conn:
+        conn.rollback()
         count = 0
         for item in listings:
             try:
