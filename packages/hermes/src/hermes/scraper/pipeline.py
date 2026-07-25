@@ -83,17 +83,12 @@ def scrape_and_seed(location: str = "Edmonton, AB", count: int = 25, db_url: str
 
 
 def _insert_properties(engine, listings: list[dict]) -> int:
-    """Insert scraped properties into the properties table."""
-    with engine.connect() as conn:
-        # Check if properties table exists and has data
-        try:
-            existing = conn.execute(text("SELECT COUNT(*) FROM properties")).scalar()
-            if existing and existing > 0:
-                logger.info(f"Properties table already has {existing} rows — skipping insert")
-                return existing
-        except Exception:
-            pass  # Table may not exist
+    """Insert scraped properties into the properties table.
 
+    Each call generates new UUIDs so ON CONFLICT never triggers —
+    every scrape session adds fresh properties.
+    """
+    with engine.connect() as conn:
         count = 0
         for item in listings:
             try:
@@ -165,14 +160,6 @@ def _generate_leads(engine, property_count: int) -> int:
                       "Summerside", "Walker Lakes", "Chappelle", "Ellerslie", "Heritage Valley"]
 
     with engine.connect() as conn:
-        try:
-            existing = conn.execute(text("SELECT COUNT(*) FROM leads")).scalar()
-            if existing and existing > 0:
-                logger.info(f"Leads table already has {existing} rows — skipping")
-                return existing
-        except Exception:
-            pass
-
         target = max(property_count * 2, 25)
         count = 0
         used_pairs = set()
@@ -284,14 +271,6 @@ def _generate_activities(engine, prop_count: int, lead_count: int) -> int:
                "document_analysis", "showing_scheduling"]
 
     with engine.connect() as conn:
-        try:
-            existing = conn.execute(text("SELECT COUNT(*) FROM activities")).scalar()
-            if existing and existing > 0:
-                logger.info(f"Activities table already has {existing} rows — skipping")
-                return existing
-        except Exception:
-            pass
-
         target = max(lead_count, 30)
         count = 0
         for _ in range(target):
@@ -335,14 +314,6 @@ def _generate_campaigns(engine, prop_count: int) -> int:
     types = ["email", "social", "newsletter", "email", "social", "email", "social", "newsletter", "email", "social"]
 
     with engine.connect() as conn:
-        try:
-            existing = conn.execute(text("SELECT COUNT(*) FROM campaigns")).scalar()
-            if existing and existing > 0:
-                logger.info(f"Campaigns table already has {existing} rows — skipping")
-                return existing
-        except Exception:
-            pass
-
         count = 0
         for i, name in enumerate(names):
             ctype = types[i % len(types)]
