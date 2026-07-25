@@ -836,6 +836,24 @@ async def athena_system_overview(current_user: Optional[TokenPayload] = Depends(
     except:
         leads = listings = hot = active = 0
     
+    # Scope by user if authenticated
+    uid = current_user.sub if current_user else None
+    if uid:
+        try:
+            from sqlalchemy import create_engine, text
+            from sqlalchemy.orm import Session
+            from .config import settings
+            db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+            if db_url:
+                engine = create_engine(db_url)
+                with Session(engine) as session:
+                    leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE agent_id = :uid"), {"uid": uid}).scalar() or 0
+                    listings = session.execute(text("SELECT COUNT(*) FROM properties WHERE agent_id = :uid"), {"uid": uid}).scalar() or 0
+                    hot = session.execute(text("SELECT COUNT(*) FROM leads WHERE agent_id = :uid AND ai_score >= 80"), {"uid": uid}).scalar() or 0
+                    active = session.execute(text("SELECT COUNT(*) FROM properties WHERE agent_id = :uid AND status = 'ACTIVE'"), {"uid": uid}).scalar() or 0
+        except:
+            pass
+    
     import psutil
     cpu = psutil.cpu_percent()
     mem = psutil.virtual_memory()
