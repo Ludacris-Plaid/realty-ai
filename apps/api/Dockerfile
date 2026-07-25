@@ -42,12 +42,11 @@ RUN curl -sL https://github.com/h4ckf0r0day/obscura/releases/download/v0.1.10/ob
     && rm /tmp/obscura.tar.gz /tmp/obscura-worker 2>/dev/null; echo "obscura installed"
 
 # Agent-Reach — platform connectivity (web reading, search, YouTube, GitHub, etc.)
-RUN pip install --no-cache-dir git+https://github.com/Panniantong/Agent-Reach.git 2>/dev/null \
+RUN pip install --no-cache-dir git+https://github.com/Panniantong/Agent-Reach.git \
     || echo "agent-reach skipped (optional)"
 
-# Browser-Use — full browser automation with Playwright
-RUN pip install --no-cache-dir browser-use 2>/dev/null \
-    && python3 -m playwright install chromium 2>/dev/null \
+# Browser-Use — full browser automation (package only; chromium binary downloaded on demand)
+RUN pip install --no-cache-dir browser-use \
     || echo "browser-use skipped (optional)"
 
 # ─── Step 6: Add monorepo source dirs to Python path ────────────────────

@@ -36,19 +36,17 @@ class BrowserUseScraper:
         self._available = None
 
     def is_available(self) -> bool:
-        """Check if browser-use + Playwright are installed."""
+        """Check if browser-use + Playwright are installed.
+
+        Returns True even if chromium binary is not yet downloaded —
+        the search() method will attempt JS rendering and fall back gracefully.
+        """
         if self._available is not None:
             return self._available
         try:
             import browser_use  # noqa: F401
-            # Quick Playwright check
-            import subprocess
-            result = subprocess.run(
-                ["python", "-m", "playwright", "install", "--dry-run", "chromium"],
-                capture_output=True, text=True, timeout=10,
-            )
-            self._available = result.returncode == 0 or "already" in result.stdout
-        except Exception:
+            self._available = True
+        except ImportError:
             self._available = False
         return self._available
 
