@@ -1091,10 +1091,10 @@ def _scrape_properties_advanced(location: str, max_results: int = 25) -> str:
         output += f"{i}. **{p.get('address_street', 'N/A')}**\n"
         output += f"   💰 ${p.get('list_price', 0):,} | 🛏️ {p.get('beds', 0)}bd | 🛁 {p.get('baths', 0)}ba | 📐 {p.get('sqft', 0)}sqft\n"
         output += f"   Type: {p.get('property_type', 'N/A')} | Status: {p.get('status', 'N/A')}\n"
-        if url:
-            output += f"   🔗 [View Listing]({url})\n"
         if images:
-            output += f"   🖼️ {images[0]}\n"
+            output += f"   📷 ![{p.get('address_street', 'photo')}]({images[0]}?w=400&h=300&fit=crop)\n"
+        if url:
+            output += f"   🔗 [View on Zillow]({url})\n"
         output += "\n"
 
     if len(listings) > 10:
@@ -1138,33 +1138,47 @@ def _check_scraper_sources() -> str:
 
 
 def _scrape_and_import(location: str, max_results: int = 25) -> str:
-    """Scrape properties and import them into the system as listings.
-
-    Uses the full pipeline: scrape → insert properties → generate leads
-    → activities → campaigns → showings.
-    """
+    """Scrape properties and import them into the system as listings."""
     if not location:
         location = "Edmonton, AB"
 
     try:
+        from hermes.scraper.zillow import ZillowScraper
         from hermes.scraper.pipeline import scrape_and_seed
 
-        # Get DB URL from env (same pattern as the API scrape endpoint)
         import os
         db_url = os.environ.get("DATABASE_URL", "")
         db_url = db_url.replace("+asyncpg", "").replace("+psycopg", "")
 
+        scraper = ZillowScraper()
+        listings = scraper.search(location, max_results)
+        if not listings:
+            return f"No listings found for {location}."
+
         result = scrape_and_seed(location=location, count=max_results, db_url=db_url, user_id=_current_user_id)
 
-        parts = [
-            f"**Scrape & Import Complete — {location}**",
-            f"",
-            f"  📊 Properties scraped: {result.get('scraped', 0)}",
-            f"  🏠 Properties inserted: {result.get('properties_inserted', 0)}",
-            f"",
-            f"Source: {result.get('source', 'unknown')}",
-        ]
-        return "\n".join(parts)
+        output = f"**Scrape & Import Complete — {location}**\n\n"
+        output += f"📊 {len(listings)} properties scraped | 🏠 {result.get('properties_inserted', 0)} inserted\n"
+        output += f"Source: {result.get('source', 'unknown')}\n\n"
+
+        for l in listings[:5]:
+            url = l.get("url", "")
+            images = l.get("images", [])
+            output += f"  **{l.get('address_street', '?')}** — ${l.get('list_price', 0):,} | {l.get('beds', 0)}bd/{l.get('baths', 0)}ba/{l.get('sqft', 0)}sqft\n"
+            if images:
+                output += f"  ![{l.get('address_street', 'photo')}]({images[0]})\n"
+            if url:
+                output += f"  [View on Zillow]({url})\n"
+            output += "\n"
+
+        if len(listings) > 5:
+            output += f"... and {len(listings) - 5} more properties imported.\n"
+
+        return output.strip()
+
+    except Exception as e:
+        logger.warning(f"scrape_and_import failed: {e}")
+        return f"Import failed: {e}"
     except Exception as e:
         logger.warning(f"scrape_and_import failed: {e}")
         return f"Import failed: {e}"

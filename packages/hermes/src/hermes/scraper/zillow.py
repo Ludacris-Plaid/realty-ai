@@ -99,9 +99,9 @@ class ZillowScraper:
 
             beds, baths, sqft = 0, 0, 0
             addr = ""
-            img = ""
+            images = []
 
-            for j in range(i + 1, min(i + 10, len(lines))):
+            for j in range(i + 1, min(i + 12, len(lines))):
                 if j >= len(lines):
                     break
                 l = lines[j].strip()
@@ -114,9 +114,10 @@ class ZillowScraper:
                 if not addr and self._extract_url(l):
                     addr_line = re.sub(r'\[|\]', '', l).strip()
                     addr = addr_line.split("(")[0].strip()
-                if not img:
-                    img = self._extract_img(l)
-                if beds and baths and addr:
+                img = self._extract_img(l)
+                if img and img not in images:
+                    images.append(img)
+                if beds and baths and addr and len(images) >= 1:
                     break
 
             if not addr:
@@ -138,7 +139,7 @@ class ZillowScraper:
                 "garage_spaces": 0,
                 "description": f"{beds}-bed, {baths}-bath home listed at ${price:,}.",
                 "features": [],
-                "images": [img] if img else [],
+                "images": images,
                 "url": url,
                 "scraped_at": datetime.utcnow().isoformat(),
                 "source": "zillow",
@@ -253,7 +254,11 @@ class ZillowScraper:
         return m.group(1) if m else ""
 
     def _extract_img(self, line: str) -> str:
-        m = re.search(r'(https://[^\s]+\.(?:jpg|jpeg|png|webp))', line, re.IGNORECASE)
+        # Jina Reader format: ![alt](img_url)
+        m = re.search(r'!\[.*?\]\((https://[^\s)]+\.(?:jpg|jpeg|png|webp))\)', line, re.IGNORECASE)
+        if m:
+            return m.group(1)
+        m = re.search(r'(https://[^\s)]+\.(?:jpg|jpeg|png|webp))', line, re.IGNORECASE)
         return m.group(1) if m else ""
 
     def _fallback_listings(self, location: str, count: int) -> list[dict]:
