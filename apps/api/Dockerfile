@@ -1,7 +1,13 @@
 FROM python:3.12-slim AS base
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+# System deps: build tools + Playwright dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev curl ca-certificates \
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 \
+    libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
+    && rm -rf /var/lib/apt/lists/*
 
 # ─── Step 1: Copy pyproject.toml files to extract dependencies ──────────
 COPY packages/ai/pyproject.toml /packages/ai/pyproject.toml
@@ -26,7 +32,25 @@ COPY packages/bots /packages/bots
 RUN pip install --no-cache-dir mem0ai 2>/dev/null || echo "mem0ai skipped (optional)"
 RUN pip install --no-cache-dir sentence-transformers 2>/dev/null || echo "sentence-transformers skipped (optional)"
 
-# ─── Step 5: Add monorepo source dirs to Python path ────────────────────
+# ─── Step 5: Install scraping tools (browser automation, web reading) ────
+# Obscura — lightweight Rust headless browser (80MB, fast, stealth)
+RUN curl -sL https://github.com/h4ckf0r0day/obscura/releases/download/v0.1.10/obscura-x86_64-linux.tar.gz \
+    -o /tmp/obscura.tar.gz \
+    && tar -xzf /tmp/obscura.tar.gz -C /tmp/ \
+    && mv /tmp/obscura /usr/local/bin/obscura \
+    && chmod +x /usr/local/bin/obscura \
+    && rm /tmp/obscura.tar.gz /tmp/obscura-worker 2>/dev/null; echo "obscura installed"
+
+# Agent-Reach — platform connectivity (web reading, search, YouTube, GitHub, etc.)
+RUN pip install --no-cache-dir git+https://github.com/Panniantong/Agent-Reach.git 2>/dev/null \
+    || echo "agent-reach skipped (optional)"
+
+# Browser-Use — full browser automation with Playwright
+RUN pip install --no-cache-dir browser-use 2>/dev/null \
+    && python3 -m playwright install chromium 2>/dev/null \
+    || echo "browser-use skipped (optional)"
+
+# ─── Step 6: Add monorepo source dirs to Python path ────────────────────
 # Each package's import root is wherever __init__.py lives (src/ or root/)
 ENV PYTHONPATH=\
 /packages/ai:\
@@ -34,7 +58,7 @@ ENV PYTHONPATH=\
 /packages/hermes/src:\
 /packages/bots/src
 
-# ─── Step 6: Copy API and run ──────────────────────────────────────────
+# ─── Step 7: Copy API and run ──────────────────────────────────────────
 COPY apps/api/src /app/apps/api/src
 
 WORKDIR /app/apps/api
