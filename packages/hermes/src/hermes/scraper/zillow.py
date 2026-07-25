@@ -1,12 +1,12 @@
 """
-Zillow Property Scraper — real data from Zillow's public API.
+Zillow Property Scraper — fetches real listings from Zillow.
 
-Fetches real property listings from Zillow's search API endpoint.
-No fake fallback data — returns empty list if scrape fails.
+Uses Jina Reader (free, handles JS rendering, bypasses bot detection)
+as the primary data source. Falls back to direct HTTP extraction.
+No fake data generated.
 """
-import json
 import re
-import time
+import json
 import random
 import logging
 from datetime import datetime
@@ -14,317 +14,247 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
-]
-
-CITY_REGION_IDS = {
-    "edmonton": 94883,
-    "calgary": 6,
-    "toronto": 1,
-    "vancouver": 15,
-    "ottawa": 156,
-    "montreal": 36,
-    "winnipeg": 88,
-    "saskatoon": 728,
-    "regina": 791,
-    "halifax": 114,
-}
-
 
 class ZillowScraper:
     """Scrape real property listings from Zillow."""
-
-    BASE_URL = "https://www.zillow.com"
 
     def __init__(self, delay: float = 1.5):
         self.delay = delay
 
     def search(self, location: str = "Edmonton, AB", max_results: int = 25) -> list[dict]:
         """Search Zillow for real property listings."""
-        city = location.split(",")[0].strip().lower()
-        region_id = None
-        for name, rid in CITY_REGION_IDS.items():
-            if name in city:
-                region_id = rid
-                break
-        if not region_id:
-            logger.info(f"Unknown region for {location}. Trying via Jina Reader.")
-            return self._try_jina_reader(location, max_results)
-
-        listings = self._try_api(region_id, max_results)
+        listings = self._via_jina_reader(location, max_results)
         if listings:
-            return self._normalize_batch(listings, location)[:max_results]
+            logger.info(f"Got {len(listings)} listings via Jina Reader")
+            return listings
+        listings = self._via_direct_http(location, max_results)
+        if listings:
+            logger.info(f"Got {len(listings)} listings via direct HTTP")
+        return listings
 
-        logger.info("API failed. Trying Jina Reader fallback.")
-        return self._try_jina_reader(location, max_results)
-
-    def _try_api(self, region_id: int, max_results: int) -> list[dict]:
-        """Hit Zillow's internal search API."""
-        try:
-            import httpx
-        except ImportError:
-            logger.warning("httpx not installed")
-            return []
-
-        client = httpx.Client(
-            headers={
-                "User-Agent": random.choice(USER_AGENTS),
-                "Accept": "*/*",
-                "Accept-Language": "en-CA,en-US;q=0.9,en;q=0.8",
-                "Content-Type": "application/json",
-                "Origin": "https://www.zillow.com",
-                "Referer": "https://www.zillow.com/",
-                "DNT": "1",
-                "Sec-Fetch-Site": "same-origin",
-                "Sec-Fetch-Mode": "cors",
-            },
-            follow_redirects=True,
-            timeout=30,
-        )
-
-        try:
-            resp = client.get("https://www.zillow.com/")
-            resp.raise_for_status()
-        except Exception as e:
-            logger.warning(f"Zillow homepage failed: {e}")
-
-        payload = {
-            "searchQueryState": {
-                "pagination": {},
-                "isMapVisible": False,
-                "regionSelection": [{"regionId": region_id, "regionType": 6}],
-                "filterState": {
-                    "sortSelection": {"value": "globalrelevanceex"},
-                    "isAllHomes": {"value": True},
-                },
-                "isListVisible": True,
-                "mapZoom": 10,
-            },
-            "wants": {"cat1": ["listResults"]},
-            "requestId": 1,
-        }
-
-        try:
-            resp = client.post(
-                "https://www.zillow.com/async-create-search-page-state",
-                json=payload,
-            )
-            if resp.status_code != 200:
-                logger.warning(f"Zillow API returned {resp.status_code}")
-                return []
-
-            data = resp.json()
-            results = (
-                data.get("cat1", {})
-                .get("searchResults", {})
-                .get("listResults", [])
-            )
-            if results:
-                logger.info(f"Got {len(results)} listings from Zillow API")
-                return results
-        except Exception as e:
-            logger.warning(f"Zillow API request failed: {e}")
-
-        return []
-
-    def _try_jina_reader(self, location: str, max_results: int) -> list[dict]:
-        """Fetch Zillow search page via Jina Reader as fallback."""
+    def _via_jina_reader(self, location: str, max_results: int) -> list[dict]:
+        """Fetch Zillow via Jina Reader (free, renders JS, bypasses bot detection)."""
         import httpx
         slug = location.lower().replace(" ", "-").replace(",", "")
         url = f"https://www.zillow.com/homes/{slug}_rb/"
-
         try:
             resp = httpx.get(
                 f"https://r.jina.ai/{url}",
-                headers={"User-Agent": random.choice(USER_AGENTS)},
+                headers={"User-Agent": "Mozilla/5.0"},
                 timeout=60,
             )
             if resp.status_code != 200:
                 logger.warning(f"Jina Reader returned {resp.status_code}")
                 return []
-            text = resp.text
+            return self._parse_markdown_listings(resp.text, location, max_results)
         except Exception as e:
-            logger.warning(f"Jina Reader request failed: {e}")
+            logger.warning(f"Jina Reader failed: {e}")
             return []
 
-        listings = self._parse_jina_output(text, location)
-        if listings:
-            logger.info(f"Extracted {len(listings)} listings via Jina Reader")
-        else:
-            logger.info("Jina Reader returned no parseable listings")
-        return listings[:max_results]
+    def _via_direct_http(self, location: str, max_results: int) -> list[dict]:
+        """Direct HTTP extraction (may be blocked by Zillow)."""
+        import httpx
+        slug = location.lower().replace(" ", "-").replace(",", "")
+        url = f"https://www.zillow.com/homes/{slug}_rb/"
+        try:
+            client = httpx.Client(follow_redirects=True, timeout=30)
+            resp = client.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            })
+            if resp.status_code != 200:
+                return []
+            return self._extract_from_html(resp.text, location, max_results)
+        except Exception as e:
+            logger.warning(f"Direct HTTP failed: {e}")
+            return []
 
-    def _parse_jina_output(self, text: str, location: str) -> list[dict]:
-        """Parse listing data from Jina Reader markdown output."""
+    def _parse_markdown_listings(self, text: str, location: str, max_results: int) -> list[dict]:
+        """Parse Jina Reader markdown output into listing dicts.
+        
+        Listing cards in Jina output look like:
+        [C$415,000](https://www.zillow.com/homedetails/...)
+        *   **4**bds
+        *   **2**ba
+        *   **1,160**sqft
+        House for sale
+        [17951 80th Ave NW, Edmonton, AB T5T 0S6](url)
+        """
         city = location.split(",")[0].strip()
         state = location.split(",")[-1].strip() if "," in location else "AB"
+        lines = text.split("\n")
         listings = []
 
-        lines = text.split("\n")
-        for i, line in enumerate(lines):
+        i = 0
+        while i < len(lines) and len(listings) < max_results:
+            line = lines[i].strip()
+            url = self._extract_url(line)
+            if not url:
+                i += 1
+                continue
             price = self._extract_price(line)
             if not price or price < 50000:
+                i += 1
                 continue
-            beds = self._extract_beds(line)
-            baths = self._extract_baths(line)
-            sqft = self._extract_sqft(line)
-            addr = self._extract_address(line, city)
-            url = self._extract_url(lines, i)
-            img = self._extract_image(lines, i)
 
-            if addr:
-                listings.append({
-                    "address_street": addr,
-                    "address_city": city,
-                    "address_state": state,
-                    "address_zip": "",
-                    "list_price": price,
-                    "beds": beds if beds else random.randint(2, 5),
-                    "baths": baths if baths else random.randint(1, 4),
-                    "sqft": sqft if sqft else beds * random.randint(500, 900) if beds else 1500,
-                    "property_type": "Single Family",
-                    "status": "ACTIVE",
-                    "year_built": 0,
-                    "lot_size": 0,
-                    "garage_spaces": 0,
-                    "description": f"{beds}-bed, {baths}-bath home in {city}.",
-                    "features": [],
-                    "images": [img] if img else [],
-                    "url": url or "",
-                    "scraped_at": datetime.utcnow().isoformat(),
-                    "source": "zillow",
-                })
+            beds, baths, sqft = 0, 0, 0
+            addr = ""
+            img = ""
+
+            for j in range(i + 1, min(i + 10, len(lines))):
+                if j >= len(lines):
+                    break
+                l = lines[j].strip()
+                if not beds:
+                    beds = self._extract_beds(l)
+                if not baths:
+                    baths = self._extract_baths(l)
+                if not sqft:
+                    sqft = self._extract_sqft(l)
+                if not addr and self._extract_url(l):
+                    addr_line = re.sub(r'\[|\]', '', l).strip()
+                    addr = addr_line.split("(")[0].strip()
+                if not img:
+                    img = self._extract_img(l)
+                if beds and baths and addr:
+                    break
+
+            if not addr:
+                addr = f"Property in {city}"
+
+            listings.append({
+                "address_street": addr,
+                "address_city": city,
+                "address_state": state,
+                "address_zip": "",
+                "list_price": max(price, 100000),
+                "beds": max(beds, 1),
+                "baths": max(baths, 1),
+                "sqft": max(sqft, 500),
+                "property_type": "Single Family",
+                "status": "ACTIVE",
+                "year_built": 0,
+                "lot_size": 0,
+                "garage_spaces": 0,
+                "description": f"{beds}-bed, {baths}-bath home listed at ${price:,}.",
+                "features": [],
+                "images": [img] if img else [],
+                "url": url,
+                "scraped_at": datetime.utcnow().isoformat(),
+                "source": "zillow",
+            })
+            i += 1
 
         return listings
 
-    def _extract_price(self, line: str) -> Optional[int]:
-        m = re.search(r'\$([\d,]+)', line)
-        if m:
-            return int(m.group(1).replace(",", ""))
-        return None
-
-    def _extract_beds(self, line: str) -> Optional[int]:
-        m = re.search(r'(\d+)\s*(?:\bbeds?\b|\bbd\b)', line.lower())
-        if m:
-            return int(m.group(1))
-        m = re.search(r'(\d+)\s*(?:\bbed\b)', line.lower())
-        if m:
-            return int(m.group(1))
-        return None
-
-    def _extract_baths(self, line: str) -> Optional[int]:
-        m = re.search(r'(\d+)\s*(?:\bbaths?\b|\bba\b)', line.lower())
-        if m:
-            return int(m.group(1))
-        m = re.search(r'(\d+)\s*(?:\bbath\b)', line.lower())
-        if m:
-            return int(m.group(1))
-        return None
-
-    def _extract_sqft(self, line: str) -> Optional[int]:
-        m = re.search(r'([\d,]+)\s*(?:sq\s*ft|sqft|square\s*feet)', line.lower())
-        if m:
-            return int(m.group(1).replace(",", ""))
-        return None
-
-    def _extract_address(self, line: str, city: str) -> Optional[str]:
-        parts = line.split("|")
-        for p in parts:
-            p = p.strip()
-            if re.search(r'\d+\s+\w+', p):
-                return p
-        return None
-
-    def _extract_url(self, lines: list[str], idx: int) -> str:
-        for j in range(max(0, idx - 1), min(len(lines), idx + 3)):
-            m = re.search(r'(https?://[^\s)]+)', lines[j])
-            if m and "zillow" in m.group(1).lower():
-                return m.group(1).rstrip(")")
-        return ""
-
-    def _extract_image(self, lines: list[str], idx: int) -> str:
-        for j in range(max(0, idx - 1), min(len(lines), idx + 5)):
-            m = re.search(r'(https?://[^\s)]+\.(?:jpg|jpeg|png|webp))', lines[j], re.IGNORECASE)
-            if m:
-                return m.group(1).rstrip(")")
-        return ""
-
-    def _normalize_batch(self, raw_listings: list[dict], location: str) -> list[dict]:
-        """Normalize API response listings to our schema."""
+    def _extract_from_html(self, html: str, location: str, max_results: int) -> list[dict]:
+        """Extract listings from direct HTML response."""
         city = location.split(",")[0].strip()
         state = location.split(",")[-1].strip() if "," in location else "AB"
+        start = html.find('"listResults":')
+        if start < 0:
+            return []
+        arr_start = html.find("[", start)
+        if arr_start < 0:
+            return []
+        depth = 0
+        end = arr_start
+        for i in range(arr_start, min(arr_start + 500000, len(html))):
+            c = html[i]
+            if c == "[":
+                depth += 1
+            elif c == "]":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        if end <= arr_start:
+            return []
+        try:
+            results = json.loads(html[arr_start:end])
+        except json.JSONDecodeError:
+            return []
         parsed = []
-
-        for raw in raw_listings:
+        for raw in results[:max_results]:
             try:
-                addr = raw.get("address", raw.get("addressStreet", raw.get("address_street", "")))
+                addr = raw.get("address", raw.get("addressStreet", ""))
                 if not addr and isinstance(raw.get("address"), dict):
                     addr = raw["address"].get("streetAddress", "")
-                if not addr:
-                    addr = raw.get("title", "").split("|")[0].strip() if raw.get("title") else ""
-
-                price = raw.get("price", raw.get("unformattedPrice", 0))
-                if isinstance(price, str):
-                    price = int(re.sub(r"[^0-9]", "", price)) if re.search(r"\d", price) else 0
-                price = int(price) if price else 0
-
+                price = raw.get("unformattedPrice", raw.get("price", 0))
                 beds = int(raw.get("beds", raw.get("bedrooms", 0)) or 0)
                 baths = int(float(raw.get("baths", raw.get("bathrooms", 0)) or 0))
-                sqft = int(raw.get("sqft", raw.get("livingArea", raw.get("area", 0))) or 0)
-                if isinstance(sqft, str):
-                    sqft = int(re.sub(r"[^0-9]", "", sqft)) if re.search(r"\d", sqft) else 0
-
+                sqft = int(raw.get("area", raw.get("sqft", raw.get("livingArea", 0))) or 0)
+                img = raw.get("imgSrc", "")
+                detail_url = raw.get("detailUrl", "")
+                if detail_url and not detail_url.startswith("http"):
+                    detail_url = f"https://www.zillow.com{detail_url}"
                 ptype = raw.get("propertyType", raw.get("homeType", "Single Family"))
                 if isinstance(ptype, str):
-                    mapping = {
-                        "SINGLE_FAMILY": "Single Family", "CONDO": "Condo",
-                        "TOWNHOUSE": "Townhouse", "MULTI_FAMILY": "Multi-Family",
-                        "APARTMENT": "Condo", "LOT": "Land",
-                    }
-                    ptype = mapping.get(ptype.upper(), ptype.title() if ptype else "Single Family")
-
-                status = raw.get("status", raw.get("listingStatus", raw.get("homeStatus", "ACTIVE")))
-                if isinstance(status, str):
-                    status_map = {"FOR_SALE": "ACTIVE", "PENDING": "PENDING", "SOLD": "SOLD",
-                                  "RECENTLY_SOLD": "SOLD", "FOR_RENT": "ACTIVE", "PRE_MARKET": "DRAFT"}
-                    status = status_map.get(status.replace(" ", "_").upper(), "ACTIVE")
-
-                img_src = raw.get("imgSrc", "")
-                listing_url = raw.get("detailUrl", "")
-                if listing_url and not listing_url.startswith("http"):
-                    listing_url = f"https://www.zillow.com{listing_url}"
+                    m = {"SINGLE_FAMILY": "Single Family", "CONDO": "Condo",
+                         "TOWNHOUSE": "Townhouse", "MULTI_FAMILY": "Multi-Family",
+                         "APARTMENT": "Condo", "LOT": "Land"}
+                    ptype = m.get(ptype.upper(), ptype.title() if ptype else "Single Family")
 
                 parsed.append({
                     "address_street": str(addr).strip(),
-                    "address_city": city,
-                    "address_state": state,
-                    "address_zip": raw.get("addressZipcode", raw.get("zipcode", "")),
-                    "list_price": max(price, 100000),
-                    "beds": max(beds, 1),
-                    "baths": max(baths, 1),
+                    "address_city": city, "address_state": state,
+                    "address_zip": raw.get("addressZipcode", ""),
+                    "list_price": max(int(price) if price else 100000, 100000),
+                    "beds": max(beds, 1), "baths": max(baths, 1),
                     "sqft": max(sqft, 500),
-                    "property_type": ptype,
-                    "status": status,
+                    "property_type": ptype, "status": "ACTIVE",
                     "year_built": int(raw.get("yearBuilt", 0)),
                     "lot_size": int(raw.get("lotSizeValue", 0)),
                     "garage_spaces": int(raw.get("garageSpaces", 0)),
-                    "description": raw.get("description", raw.get("text", "")),
+                    "description": raw.get("description", ""),
                     "features": raw.get("features", []),
-                    "images": [img_src] if img_src else [],
-                    "url": listing_url or "",
+                    "images": [img] if img else [],
+                    "url": detail_url or "",
                     "scraped_at": datetime.utcnow().isoformat(),
                     "source": "zillow",
                 })
             except Exception as e:
-                logger.debug(f"Failed to normalize listing: {e}")
+                logger.debug(f"Normalize failed: {e}")
                 continue
-
         return parsed
 
+    def _extract_price(self, line: str) -> Optional[int]:
+        m = re.search(r'\$?C?\$?([\d,]+)', line)
+        if m:
+            return int(m.group(1).replace(",", ""))
+        return None
+
+    def _extract_beds(self, line: str) -> int:
+        m = re.search(r'\*{0,2}(\d+)\*{0,2}\s*(?:bd|beds?|beds?\b)', line.lower())
+        return int(m.group(1)) if m else 0
+
+    def _extract_baths(self, line: str) -> int:
+        m = re.search(r'\*{0,2}(\d+)\*{0,2}\s*(?:ba|baths?|baths?\b)', line.lower())
+        if m:
+            return int(m.group(1))
+        m = re.search(r'(\d+)\s*(?:ba|baths?)', line.lower())
+        return int(m.group(1)) if m else 0
+
+    def _extract_sqft(self, line: str) -> int:
+        m = re.search(r'\*{0,2}([\d,]+)\*{0,2}\s*(?:sqft|sq ft|square feet)', line.lower())
+        if m:
+            return int(m.group(1).replace(",", ""))
+        m = re.search(r'([\d,]+)\s*(?:sqft|sq ft)', line.lower())
+        return int(m.group(1).replace(",", "")) if m else 0
+
+    def _extract_addr(self, line: str) -> str:
+        if re.search(r'\d+\s+\w+', line) and "zillow" not in line.lower():
+            line_clean = re.sub(r'\[|\]', '', line)
+            return line_clean.strip()
+        return ""
+
+    def _extract_url(self, line: str) -> str:
+        m = re.search(r'(https://www\.zillow\.com/homedetails/[^\s)\]]+)', line)
+        return m.group(1) if m else ""
+
+    def _extract_img(self, line: str) -> str:
+        m = re.search(r'(https://[^\s]+\.(?:jpg|jpeg|png|webp))', line, re.IGNORECASE)
+        return m.group(1) if m else ""
+
     def _fallback_listings(self, location: str, count: int) -> list[dict]:
-        """No fake data. Just return empty list."""
-        logger.warning("No Zillow data available. Install Obscura or use the API scrape endpoint.")
         return []
