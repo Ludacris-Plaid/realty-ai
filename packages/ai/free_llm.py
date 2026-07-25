@@ -70,7 +70,7 @@ NINEROUTER_UPSTREAMS = [
 FREE_PROVIDERS = [
     {
         "name": "deepseek",
-        "base": "https://api.deepseek.com",
+        "base": "https://api.deepseek.com/v1",
         "key_env": "DEEPSEEK_API_KEY",
         "model": "deepseek-v4-flash",
         "keyless": False,
