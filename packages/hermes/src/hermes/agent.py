@@ -263,13 +263,17 @@ class AthenaAgent:
         logger.info(f"Athena initialized. Session: {self.session_id}, Model: {self.model_name}")
     
     def _build_llm(self, model_name: str):
-        """Build a self-healing LLM over the free-provider pool.
-
-        Replaces the old static tier list with ResilientLLM, which rotates
-        across every enabled free provider and falls through on ANY failure
-        (timeout, 429 rate-limit, 5xx, auth). This keeps Athena answering even
-        when several providers are down or throttled.
-        """
+        """Build LLM. Uses DeepSeek API if DEEPSEEK_API_KEY is set."""
+        ds_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        if ds_key:
+            logger.info(f"Using DeepSeek API with model {model_name}")
+            return ChatOpenAI(
+                model=model_name,
+                base_url="https://api.deepseek.com/v1",
+                api_key=ds_key,
+                temperature=0.3,
+                max_tokens=4096,
+            )
         try:
             from free_llm import build_resilient_llm
             llm = build_resilient_llm(model_name=model_name, temperature=0.3, max_tokens=4096)
