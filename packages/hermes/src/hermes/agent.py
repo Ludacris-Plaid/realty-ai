@@ -540,9 +540,20 @@ class AthenaAgent:
             xml_tool_calls = []
             if hasattr(response, 'tool_calls') and response.tool_calls:
                 # Format 1: Proper OpenAI function calling
+                # LangChain AIMessage.tool_calls returns list of ToolCall objects
+                # with .name and .args attributes (not dict items)
                 for tc in response.tool_calls:
-                    tc_name = tc.get('name', '')
-                    tc_args = tc.get('args', {})
+                    if isinstance(tc, dict):
+                        tc_name = tc.get('name', '')
+                        tc_args = tc.get('args', {})
+                    else:
+                        tc_name = getattr(tc, 'name', '') or getattr(tc, 'function', {}).get('name', '')
+                        tc_args = getattr(tc, 'args', {}) or getattr(tc, 'function', {}).get('arguments', {})
+                        if isinstance(tc_args, str):
+                            try:
+                                tc_args = json.loads(tc_args)
+                            except (json.JSONDecodeError, TypeError):
+                                tc_args = {}
                     if tc_name:
                         xml_tool_calls.append({"name": tc_name, "args": tc_args})
             else:
