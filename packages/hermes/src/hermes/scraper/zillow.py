@@ -101,7 +101,7 @@ class ZillowScraper:
             addr = ""
             images = []
 
-            for j in range(i + 1, min(i + 12, len(lines))):
+            for j in range(i + 1, min(i + 25, len(lines))):
                 if j >= len(lines):
                     break
                 l = lines[j].strip()
@@ -116,7 +116,7 @@ class ZillowScraper:
                 img = self._extract_img(l)
                 if img and img not in images:
                     images.append(img)
-                if beds and baths and addr and len(images) >= 1:
+                if beds and baths and addr and len(images) >= 3:
                     break
 
             if not addr:
