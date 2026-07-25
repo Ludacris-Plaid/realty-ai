@@ -69,17 +69,9 @@ NINEROUTER_UPSTREAMS = [
 # 9router and other providers are fallbacks.
 FREE_PROVIDERS = [
     {
-        "name": "deepseek",
-        "base": "https://api.deepseek.com/v1",
-        "key_env": "DEEPSEEK_API_KEY",
-        "model": "deepseek-v4-flash",
-        "keyless": False,
-        "note": "DeepSeek official API. Set DEEPSEEK_API_KEY.",
-    },
-    {
         "name": "opencode-zen",
         "base": "https://opencode.ai/zen/v1",
-        "key_env": "LLM_API_KEY",          # optional; zen works keyless
+        "key_env": "LLM_API_KEY",
         "model": "deepseek-v4-flash-free",
         "keyless": True,
         "note": "Primary free tier (Novita upstream). No key required.",
