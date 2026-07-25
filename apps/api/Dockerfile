@@ -1,9 +1,9 @@
 FROM python:3.12-slim AS base
 WORKDIR /app
 
-# System deps: build tools + Playwright dependencies
+# System deps: build tools + Playwright dependencies for browser-use
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev curl ca-certificates \
+    gcc libpq-dev curl ca-certificates git \
     libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
     libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 \
     libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
@@ -39,15 +39,12 @@ RUN curl -sL https://github.com/h4ckf0r0day/obscura/releases/download/v0.1.10/ob
     && tar -xzf /tmp/obscura.tar.gz -C /tmp/ \
     && mv /tmp/obscura /usr/local/bin/obscura \
     && chmod +x /usr/local/bin/obscura \
-    && rm /tmp/obscura.tar.gz /tmp/obscura-worker 2>/dev/null; echo "obscura installed"
+    && rm /tmp/obscura.tar.gz /tmp/obscura-worker 2>/dev/null && echo "obscura installed"
 
-# Agent-Reach — platform connectivity (web reading, search, YouTube, GitHub, etc.)
-RUN pip install --no-cache-dir git+https://github.com/Panniantong/Agent-Reach.git \
-    || echo "agent-reach skipped (optional)"
+# Browser-Use — full browser automation (package only; chromium binary downloaded on demand at runtime)
+RUN pip install --no-cache-dir browser-use 2>/dev/null || echo "browser-use skipped (optional)"
 
-# Browser-Use — full browser automation (package only; chromium binary downloaded on demand)
-RUN pip install --no-cache-dir browser-use \
-    || echo "browser-use skipped (optional)"
+# Agent-Reach — platform connectivity. Installed from GitHub at runtime via startup script
 
 # ─── Step 6: Add monorepo source dirs to Python path ────────────────────
 # Each package's import root is wherever __init__.py lives (src/ or root/)
@@ -57,9 +54,11 @@ ENV PYTHONPATH=\
 /packages/hermes/src:\
 /packages/bots/src
 
-# ─── Step 7: Copy API and run ──────────────────────────────────────────
+# ─── Step 7: Copy API and startup script ──────────────────────────────
 COPY apps/api/src /app/apps/api/src
+COPY apps/api/start.sh /app/apps/api/start.sh
+RUN chmod +x /app/apps/api/start.sh
 
 WORKDIR /app/apps/api
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["/app/apps/api/start.sh"]
