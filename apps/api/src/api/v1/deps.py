@@ -19,11 +19,6 @@ from ...auth import (
 )
 
 # Router-level dependencies for convenience
-def require_user() -> TokenPayload:
-    """Dependency that requires a valid JWT and returns TokenPayload."""
-    return Depends(_get_current_user_strict)
-
-
-def optional_user() -> Optional[TokenPayload]:
-    """Dependency that returns TokenPayload if JWT present, else None."""
-    return Depends(_get_current_user_optional)
+# These are plain callables — callers wrap them in Depends() themselves
+require_user = _get_current_user_strict
+optional_user = _get_current_user_optional
