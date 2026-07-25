@@ -131,8 +131,8 @@ class ZillowScraper:
                 "beds": max(beds, 1),
                 "baths": max(baths, 1),
                 "sqft": max(sqft, 500),
-                "property_type": "single_family",
-                "status": "active",
+                "property_type": "SINGLE_FAMILY",
+                "status": "ACTIVE",
                 "year_built": 0,
                 "lot_size": 0,
                 "garage_spaces": 0,
@@ -188,12 +188,12 @@ class ZillowScraper:
                 detail_url = raw.get("detailUrl", "")
                 if detail_url and not detail_url.startswith("http"):
                     detail_url = f"https://www.zillow.com{detail_url}"
-                ptype = raw.get("propertyType", raw.get("homeType", "single_family"))
+                ptype = raw.get("propertyType", raw.get("homeType", "SINGLE_FAMILY"))
                 if isinstance(ptype, str):
-                    m = {"SINGLE_FAMILY": "single_family", "CONDO": "condo",
-                         "TOWNHOUSE": "townhouse", "MULTI_FAMILY": "multi_family",
-                         "APARTMENT": "condo", "LOT": "land"}
-                    ptype = m.get(ptype.upper(), ptype.lower().replace(" ", "_") if ptype else "single_family")
+                    m = {"SINGLE_FAMILY": "SINGLE_FAMILY", "CONDO": "CONDO",
+                         "TOWNHOUSE": "TOWNHOUSE", "MULTI_FAMILY": "MULTI_FAMILY",
+                         "APARTMENT": "CONDO", "LOT": "LAND", "SINGLE_FAMILY": "SINGLE_FAMILY"}
+                    ptype = m.get(ptype.upper(), "SINGLE_FAMILY")
 
                 parsed.append({
                     "address_street": str(addr).strip(),
@@ -202,7 +202,7 @@ class ZillowScraper:
                     "list_price": max(int(price) if price else 100000, 100000),
                     "beds": max(beds, 1), "baths": max(baths, 1),
                     "sqft": max(sqft, 500),
-                    "property_type": ptype, "status": "active",
+                    "property_type": ptype, "status": "ACTIVE",
                     "year_built": int(raw.get("yearBuilt", 0)),
                     "lot_size": int(raw.get("lotSizeValue", 0)),
                     "garage_spaces": int(raw.get("garageSpaces", 0)),
@@ -243,15 +243,12 @@ class ZillowScraper:
         return int(m.group(1).replace(",", "")) if m else 0
 
     def _extract_addr(self, line: str) -> str:
-        if re.search(r'\d+\s+\w+', line) and "zillow" not in line.lower():
-            line_clean = re.sub(r'\[|\]', '', line).strip()
-            addr = line_clean.split("(")[0].strip()
-            # Remove city/state/zip from address if present
-            parts = addr.split(",")
-            if len(parts) > 1:
-                addr = parts[0].strip()
-            return addr
-        return ""
+        line_no_url = re.sub(r'\(https?://[^\s)]+\)', '', line)
+        line_clean = re.sub(r'\[|\]', '', line_no_url).strip()
+        if not re.search(r'\d+\s+\w+', line_clean):
+            return ""
+        parts = line_clean.split(",")
+        return parts[0].strip() if parts else line_clean
 
     def _extract_url(self, line: str) -> str:
         m = re.search(r'(https://www\.zillow\.com/homedetails/[^\s)\]]+)', line)
