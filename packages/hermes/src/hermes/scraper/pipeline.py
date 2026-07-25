@@ -53,6 +53,8 @@ def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
                     "scraped_at": item.get("scraped_at", ""),
                     "source": item.get("source", "scraper"),
                     "features": item.get("features", []),
+                    "images": item.get("images", []),
+                    "url": item.get("url", ""),
                 })
 
                 sql = """

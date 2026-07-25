@@ -362,21 +362,31 @@ def _list_listings(status: Optional[str] = None) -> str:
         uid = _current_user_id
         if status:
             if uid:
-                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type FROM properties WHERE status = :s AND agent_id = :uid LIMIT 20", {"s": status, "uid": uid})
+                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type, metadata FROM properties WHERE status = :s AND agent_id = :uid LIMIT 20", {"s": status, "uid": uid})
             else:
-                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type FROM properties WHERE status = :s LIMIT 20", {"s": status})
+                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type, metadata FROM properties WHERE status = :s LIMIT 20", {"s": status})
         else:
             if uid:
-                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type FROM properties WHERE agent_id = :uid LIMIT 20", {"uid": uid})
+                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type, metadata FROM properties WHERE agent_id = :uid LIMIT 20", {"uid": uid})
             else:
-                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type FROM properties LIMIT 20")
+                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type, metadata FROM properties LIMIT 20")
     except Exception as e:
         return f"Error: {e}"
     if not rows:
         return "No listings found."
     result = f"**Listings ({len(rows)}):**\n\n"
     for r in rows:
+        meta = r.get("metadata", {})
+        if isinstance(meta, str):
+            try:
+                import json
+                meta = json.loads(meta)
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+        url = meta.get("url", "") if isinstance(meta, dict) else ""
         result += f"  • {r.get('address_street','')}, {r.get('address_city','')} — ${r.get('list_price',0):,.0f} — {r.get('beds',0)}bd/{r.get('baths',0)}ba/{r.get('sqft',0)}sqft — {r.get('status','')}\n"
+        if url:
+            result += f"    🔗 {url}\n"
     return result
 
 
@@ -1076,9 +1086,16 @@ def _scrape_properties_advanced(location: str, max_results: int = 25) -> str:
     output += f"Sources: {source_summary}\n\n"
 
     for i, p in enumerate(listings[:10], 1):
+        url = p.get("url", "")
+        images = p.get("images", [])
         output += f"{i}. **{p.get('address_street', 'N/A')}**\n"
         output += f"   💰 ${p.get('list_price', 0):,} | 🛏️ {p.get('beds', 0)}bd | 🛁 {p.get('baths', 0)}ba | 📐 {p.get('sqft', 0)}sqft\n"
-        output += f"   Type: {p.get('property_type', 'N/A')} | Status: {p.get('status', 'N/A')}\n\n"
+        output += f"   Type: {p.get('property_type', 'N/A')} | Status: {p.get('status', 'N/A')}\n"
+        if url:
+            output += f"   🔗 [View Listing]({url})\n"
+        if images:
+            output += f"   🖼️ {images[0]}\n"
+        output += "\n"
 
     if len(listings) > 10:
         output += f"... and {len(listings) - 10} more properties\n"
@@ -1144,11 +1161,6 @@ def _scrape_and_import(location: str, max_results: int = 25) -> str:
             f"",
             f"  📊 Properties scraped: {result.get('scraped', 0)}",
             f"  🏠 Properties inserted: {result.get('properties_inserted', 0)}",
-            f"  👤 Leads generated: {result.get('leads_inserted', 0)}",
-            f"  📋 Activities recorded: {result.get('activities_inserted', 0)}",
-            f"  📢 Campaigns created: {result.get('campaigns_inserted', 0)}",
-            f"  🏡 Showings scheduled: {result.get('showings_inserted', 0)}",
-            f"  📄 Documents generated: {result.get('documents_inserted', 0)}",
             f"",
             f"Source: {result.get('source', 'unknown')}",
         ]
