@@ -142,8 +142,13 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "check_scraper_sources",
-        "description": "Check which web scraping tools are available on this system: requests (always), Obscura, Browser-Use, Agent-Reach. Shows what data sources Athena can access.",
+        "description": "Quick check on what web scraping sources are ready. Use this if the user asks about scraping capabilities.",
         "parameters": {}
+    },
+    {
+        "name": "scrape_and_import_properties",
+        "description": "Scrape property listings from Zillow for a city/area and import them into the system as listings with generated leads. Full end-to-end pipeline. Use this when someone wants to scrape AND save properties.",
+        "parameters": {"location": {"type": "string", "description": "City/location to scrape (e.g. 'Edmonton, AB')", "required": True}, "max_results": {"type": "integer", "description": "Maximum listings to import (default 25)", "required": False}}
     },
 ]
 
@@ -238,6 +243,8 @@ def execute_tool(name: str, args: dict) -> str:
         return _scrape_properties_advanced(args.get("location", ""), args.get("max_results", 25))
     elif name == "check_scraper_sources":
         return _check_scraper_sources()
+    elif name == "scrape_and_import_properties":
+        return _scrape_and_import(args.get("location", ""), args.get("max_results", 25))
     else:
         return f"Unknown tool: {name}"
 
@@ -1062,6 +1069,44 @@ def _check_scraper_sources() -> str:
         output += "\n**Tip:** For most MLS listings, the built-in Zillow scraper is all you need."
 
     return output
+
+
+def _scrape_and_import(location: str, max_results: int = 25) -> str:
+    """Scrape properties and import them into the system as listings.
+
+    Uses the full pipeline: scrape → insert properties → generate leads
+    → activities → campaigns → showings.
+    """
+    if not location:
+        location = "Edmonton, AB"
+
+    try:
+        from hermes.scraper.pipeline import scrape_and_seed
+
+        # Get DB URL from env (same pattern as the API scrape endpoint)
+        import os
+        db_url = os.environ.get("DATABASE_URL", "")
+        db_url = db_url.replace("+asyncpg", "").replace("+psycopg", "")
+
+        result = scrape_and_seed(location=location, count=max_results, db_url=db_url)
+
+        parts = [
+            f"**Scrape & Import Complete — {location}**",
+            f"",
+            f"  📊 Properties scraped: {result.get('scraped', 0)}",
+            f"  🏠 Properties inserted: {result.get('properties_inserted', 0)}",
+            f"  👤 Leads generated: {result.get('leads_inserted', 0)}",
+            f"  📋 Activities recorded: {result.get('activities_inserted', 0)}",
+            f"  📢 Campaigns created: {result.get('campaigns_inserted', 0)}",
+            f"  🏡 Showings scheduled: {result.get('showings_inserted', 0)}",
+            f"  📄 Documents generated: {result.get('documents_inserted', 0)}",
+            f"",
+            f"Source: {result.get('source', 'unknown')}",
+        ]
+        return "\n".join(parts)
+    except Exception as e:
+        logger.warning(f"scrape_and_import failed: {e}")
+        return f"Import failed: {e}"
 
 
 def _system_overview() -> str:
