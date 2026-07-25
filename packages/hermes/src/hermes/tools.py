@@ -1093,7 +1093,7 @@ def _scrape_properties_advanced(location: str, max_results: int = 25) -> str:
         output += f"   💰 ${p.get('list_price', 0):,} | 🛏️ {p.get('beds', 0)}bd | 🛁 {p.get('baths', 0)}ba | 📐 {p.get('sqft', 0)}sqft\n"
         output += f"   Type: {p.get('property_type', 'N/A')} | Status: {p.get('status', 'N/A')}\n"
         if images:
-            output += f"   📷 ![{p.get('address_street', 'photo')}]({images[0]}?w=400&h=300&fit=crop)\n"
+            output += f"   ![{p.get('address_street', 'photo')}]({images[0]})\n"
         if url:
             output += f"   🔗 [View on Zillow]({url})\n"
         output += "\n"

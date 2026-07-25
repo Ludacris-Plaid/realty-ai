@@ -50,20 +50,32 @@ function renderMarkdown(text: string): React.ReactNode[] {
   };
 
   const processInline = (line: string): React.ReactNode => {
-    // Bold: **text**
-    const parts = line.split(/(\*\*[^*]+\*\*)/g);
+    // Split on bold, italic, image, and link patterns
+    const parts = line.split(/(\!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*|\*[^*]+\*|https?:\/\/[^\s)]+)/g);
     return parts.map((part, i) => {
+      // Image: ![alt](url)
+      const imgMatch = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+      if (imgMatch) {
+        return <img key={i} src={imgMatch[2].split("?")[0]} alt={imgMatch[1]} className="my-1 rounded-lg max-w-[200px] max-h-[150px] object-cover" loading="lazy" />;
+      }
+      // Link: [text](url)
+      const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (linkMatch) {
+        return <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{linkMatch[1]}</a>;
+      }
+      // Bare URL
+      if (/^https?:\/\//.test(part)) {
+        return <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline hover:text-blue-800">{part.length > 60 ? part.slice(0, 60) + '...' : part}</a>;
+      }
+      // Bold: **text**
       if (part.startsWith("**") && part.endsWith("**")) {
         return <strong key={i} className="font-semibold">{part.slice(2, -2)}</strong>;
       }
       // Italic: *text*
-      const italicParts = part.split(/(\*[^*]+\*)/g);
-      return italicParts.map((ip, j) => {
-        if (ip.startsWith("*") && ip.endsWith("*") && !ip.startsWith("**")) {
-          return <em key={`${i}-${j}`}>{ip.slice(1, -1)}</em>;
-        }
-        return ip;
-      });
+      if (part.startsWith("*") && part.endsWith("*") && !part.startsWith("**")) {
+        return <em key={i}>{part.slice(1, -1)}</em>;
+      }
+      return part;
     });
   };
 
