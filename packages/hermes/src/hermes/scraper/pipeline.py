@@ -64,7 +64,7 @@ def scrape_and_seed(location: str = "Edmonton, AB", count: int = 25, db_url: str
     inserted_campaigns = _generate_campaigns(engine, inserted_props)
 
     # Phase 6: Generate showings
-    inserted_showings = _generate_showings(engine, inserted_leads, inserted_props)
+    inserted_showings = _generate_showings(engine, inserted_leads, inserted_props, user_id)
 
     # Phase 7: Generate documents
     inserted_docs = _generate_documents(engine, inserted_props)
@@ -352,7 +352,7 @@ def _generate_campaigns(engine, prop_count: int) -> int:
         return count
 
 
-def _generate_showings(engine, lead_count: int, prop_count: int) -> int:
+def _generate_showings(engine, lead_count: int, prop_count: int, user_id: str = "") -> int:
     """Generate realistic property showings."""
     try:
         with engine.connect() as conn:
@@ -390,13 +390,14 @@ def _generate_showings(engine, lead_count: int, prop_count: int) -> int:
                 sid = str(uuid.uuid4())
                 name = f"{lead[1]} {lead[2]}"
                 address = f"{prop[1]}, {prop[2]}"
+                uid = user_id or str(uuid.uuid4())
                 sql = """
-                    INSERT INTO showings (id, lead_name, property_address, showing_time, status, created_at)
-                    VALUES (:id, :name, :addr, :time, :status, NOW())
+                    INSERT INTO showings (id, user_id, lead_name, property_address, showing_time, status, created_at)
+                    VALUES (:id, :uid, :name, :addr, :time, :status, NOW())
                     ON CONFLICT (id) DO NOTHING
                 """
                 conn.execute(text(sql), {
-                    "id": sid, "name": name,
+                    "id": sid, "uid": uid, "name": name,
                     "addr": address, "time": showing_time,
                     "status": status,
                 })

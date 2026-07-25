@@ -286,7 +286,7 @@ async def seed_database(current_user: TokenPayload = Depends(get_current_user)):
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS showings (
                     id UUID PRIMARY KEY, lead_name TEXT NOT NULL,
-                    property_address TEXT, showing_time TEXT, status TEXT DEFAULT 'pending',
+                    user_id UUID, property_address TEXT, showing_time TEXT, status TEXT DEFAULT 'pending',
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """))
@@ -330,15 +330,8 @@ async def seed_database(current_user: TokenPayload = Depends(get_current_user)):
             if existing and existing > 0:
                 return {"status": "already_seeded", "count": existing}
             
-            org_id = uuid.uuid4()
-            agent_id = uuid.uuid4()
-            
-            agent = User(
-                id=agent_id, brokerage_id=org_id, email="sarah@eliterealty.com",
-                full_name="Sarah Chen", password_hash="seed-user-no-login",
-                role="agent", created_at=datetime.utcnow(),
-            )
-            session.add(agent)
+            org_id = uuid.UUID(current_user.brokerage_id) if current_user.brokerage_id else uuid.uuid4()
+            agent_id = uuid.UUID(current_user.sub)
             
             profile = AgentProfile(
                 id=uuid.uuid4(), user_id=agent_id,
@@ -506,6 +499,7 @@ class EventOut(BaseModel):
 @app.get("/api/v1/calendar/events")
 async def list_events(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """List calendar events from showings and activities."""
+    uid = current_user.sub if current_user else None
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
@@ -516,9 +510,15 @@ async def list_events(current_user: Optional[TokenPayload] = Depends(get_current
 
         with Session(engine) as session:
             # Showings → calendar events
-            showing_rows = session.execute(
-                text("SELECT id, lead_name, property_address, showing_time, status FROM showings ORDER BY showing_time LIMIT 20")
-            ).fetchall()
+            if uid:
+                showing_rows = session.execute(
+                    text("SELECT id, lead_name, property_address, showing_time, status FROM showings WHERE user_id = :uid ORDER BY showing_time LIMIT 20"),
+                    {"uid": uid}
+                ).fetchall()
+            else:
+                showing_rows = session.execute(
+                    text("SELECT id, lead_name, property_address, showing_time, status FROM showings ORDER BY showing_time LIMIT 20")
+                ).fetchall()
 
             for row in showing_rows:
                 sid, lead_name, address, showing_time, status = row
@@ -575,6 +575,7 @@ class CampaignOut(BaseModel):
 @app.get("/api/v1/campaigns")
 async def list_campaigns(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """List marketing campaigns."""
+    uid = current_user.sub if current_user else None
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
@@ -582,9 +583,15 @@ async def list_campaigns(current_user: Optional[TokenPayload] = Depends(get_curr
         db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
         engine = create_engine(db_url)
         with Session(engine) as session:
-            rows = session.execute(
-                text("SELECT id, name, audience, status, created_at FROM campaigns ORDER BY created_at DESC LIMIT 20")
-            ).fetchall()
+            if uid:
+                rows = session.execute(
+                    text("SELECT id, name, audience, status, created_at FROM campaigns WHERE user_id = :uid ORDER BY created_at DESC LIMIT 20"),
+                    {"uid": uid}
+                ).fetchall()
+            else:
+                rows = session.execute(
+                    text("SELECT id, name, audience, status, created_at FROM campaigns ORDER BY created_at DESC LIMIT 20")
+                ).fetchall()
             campaigns = []
             for row in rows:
                 cid, name, audience, status, created = row
@@ -694,6 +701,7 @@ class RecommendationOut(BaseModel):
 @app.get("/api/v1/dashboard/recommendations")
 async def dashboard_recommendations(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Generate AI-powered recommendations based on current data."""
+    uid = current_user.sub if current_user else None
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
@@ -701,15 +709,26 @@ async def dashboard_recommendations(current_user: Optional[TokenPayload] = Depen
         db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
         engine = create_engine(db_url)
         with Session(engine) as session:
-            lead_count = session.execute(text("SELECT COUNT(*) FROM leads")).scalar() or 0
-            hot_leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE ai_score >= 80")).scalar() or 0
-            dormant_leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE status = 'DORMANT'")).scalar() or 0
-            active_listings = session.execute(text("SELECT COUNT(*) FROM properties WHERE status = 'ACTIVE'")).scalar() or 0
-            pending_listings = session.execute(text("SELECT COUNT(*) FROM properties WHERE status = 'PENDING'")).scalar() or 0
-            campaign_count = session.execute(text("SELECT COUNT(*) FROM campaigns WHERE status = 'active'")).scalar() or 0
-            recent_activities = session.execute(
-                text("SELECT COUNT(*) FROM activities WHERE created_at >= NOW() - INTERVAL '7 days'")
-            ).scalar() or 0
+            if uid:
+                lead_count = session.execute(text("SELECT COUNT(*) FROM leads WHERE agent_id = :uid"), {"uid": uid}).scalar() or 0
+                hot_leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE agent_id = :uid AND ai_score >= 80"), {"uid": uid}).scalar() or 0
+                dormant_leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE agent_id = :uid AND status = 'DORMANT'"), {"uid": uid}).scalar() or 0
+                active_listings = session.execute(text("SELECT COUNT(*) FROM properties WHERE agent_id = :uid AND status = 'ACTIVE'"), {"uid": uid}).scalar() or 0
+                pending_listings = session.execute(text("SELECT COUNT(*) FROM properties WHERE agent_id = :uid AND status = 'PENDING'"), {"uid": uid}).scalar() or 0
+                campaign_count = session.execute(text("SELECT COUNT(*) FROM campaigns WHERE user_id = :uid AND status = 'active'"), {"uid": uid}).scalar() or 0
+                recent_activities = session.execute(
+                    text("SELECT COUNT(*) FROM activities WHERE user_id = :uid AND created_at >= NOW() - INTERVAL '7 days'"), {"uid": uid}
+                ).scalar() or 0
+            else:
+                lead_count = session.execute(text("SELECT COUNT(*) FROM leads")).scalar() or 0
+                hot_leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE ai_score >= 80")).scalar() or 0
+                dormant_leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE status = 'DORMANT'")).scalar() or 0
+                active_listings = session.execute(text("SELECT COUNT(*) FROM properties WHERE status = 'ACTIVE'")).scalar() or 0
+                pending_listings = session.execute(text("SELECT COUNT(*) FROM properties WHERE status = 'PENDING'")).scalar() or 0
+                campaign_count = session.execute(text("SELECT COUNT(*) FROM campaigns WHERE status = 'active'")).scalar() or 0
+                recent_activities = session.execute(
+                    text("SELECT COUNT(*) FROM activities WHERE created_at >= NOW() - INTERVAL '7 days'")
+                ).scalar() or 0
     except Exception:
         lead_count = hot_leads = dormant_leads = active_listings = 0
         pending_listings = campaign_count = recent_activities = 0

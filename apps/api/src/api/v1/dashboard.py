@@ -13,30 +13,61 @@ router = APIRouter()
 
 @router.get("/summary")
 def dashboard_summary(current_user: Optional[TokenPayload] = Depends(optional_user)):
+    uid = current_user.sub if current_user else None
     with Session(engine) as session:
-        lead_stats = session.execute(text("""
-            SELECT
-                COUNT(*)::int AS total_leads,
-                COUNT(*) FILTER (WHERE ai_score >= 80)::int AS hot_leads_count
-            FROM leads
-        """)).fetchone()
+        if uid:
+            lead_stats = session.execute(text("""
+                SELECT
+                    COUNT(*)::int AS total_leads,
+                    COUNT(*) FILTER (WHERE ai_score >= 80)::int AS hot_leads_count
+                FROM leads WHERE agent_id = :uid
+            """), {"uid": uid}).fetchone()
 
-        leads_by_status_rows = session.execute(text("""
-            SELECT status, COUNT(*)::int AS cnt
-            FROM leads
-            GROUP BY status
-            ORDER BY cnt DESC
-        """)).fetchall()
+            leads_by_status_rows = session.execute(text("""
+                SELECT status, COUNT(*)::int AS cnt
+                FROM leads WHERE agent_id = :uid
+                GROUP BY status
+                ORDER BY cnt DESC
+            """), {"uid": uid}).fetchall()
 
-        listing_stats = session.execute(text("""
-            SELECT
-                COUNT(*)::int AS total_leads,
-                COUNT(*) FILTER (WHERE status = 'ACTIVE')::int AS active_listings,
-                COALESCE(SUM(list_price), 0)::numeric(14,2) AS total_value
-            FROM properties
-        """)).fetchone()
+            listing_stats = session.execute(text("""
+                SELECT
+                    COUNT(*)::int AS total_leads,
+                    COUNT(*) FILTER (WHERE status = 'ACTIVE')::int AS active_listings,
+                    COALESCE(SUM(list_price), 0)::numeric(14,2) AS total_value
+                FROM properties WHERE agent_id = :uid
+            """), {"uid": uid}).fetchone()
 
-        try:
+            recent = session.execute(text("""
+                SELECT id, agent_name, action, intent, model_used, status,
+                       (created_at AT TIME ZONE 'UTC')::text AS created_at
+                FROM activities WHERE user_id = :uid
+                ORDER BY created_at DESC
+                LIMIT 10
+            """), {"uid": uid}).fetchall()
+        else:
+            lead_stats = session.execute(text("""
+                SELECT
+                    COUNT(*)::int AS total_leads,
+                    COUNT(*) FILTER (WHERE ai_score >= 80)::int AS hot_leads_count
+                FROM leads
+            """)).fetchone()
+
+            leads_by_status_rows = session.execute(text("""
+                SELECT status, COUNT(*)::int AS cnt
+                FROM leads
+                GROUP BY status
+                ORDER BY cnt DESC
+            """)).fetchall()
+
+            listing_stats = session.execute(text("""
+                SELECT
+                    COUNT(*)::int AS total_leads,
+                    COUNT(*) FILTER (WHERE status = 'ACTIVE')::int AS active_listings,
+                    COALESCE(SUM(list_price), 0)::numeric(14,2) AS total_value
+                FROM properties
+            """)).fetchone()
+
             recent = session.execute(text("""
                 SELECT id, agent_name, action, intent, model_used, status,
                        (created_at AT TIME ZONE 'UTC')::text AS created_at
@@ -44,8 +75,6 @@ def dashboard_summary(current_user: Optional[TokenPayload] = Depends(optional_us
                 ORDER BY created_at DESC
                 LIMIT 10
             """)).fetchall()
-        except Exception:
-            recent = []
 
         try:
             approvals = session.execute(text("""
