@@ -132,7 +132,7 @@ class ZillowScraper:
                 "baths": max(baths, 1),
                 "sqft": max(sqft, 500),
                 "property_type": "Single Family",
-                "status": "ACTIVE",
+                "status": "active",
                 "year_built": 0,
                 "lot_size": 0,
                 "garage_spaces": 0,
@@ -188,12 +188,12 @@ class ZillowScraper:
                 detail_url = raw.get("detailUrl", "")
                 if detail_url and not detail_url.startswith("http"):
                     detail_url = f"https://www.zillow.com{detail_url}"
-                ptype = raw.get("propertyType", raw.get("homeType", "Single Family"))
+                ptype = raw.get("propertyType", raw.get("homeType", "single_family"))
                 if isinstance(ptype, str):
-                    m = {"SINGLE_FAMILY": "Single Family", "CONDO": "Condo",
-                         "TOWNHOUSE": "Townhouse", "MULTI_FAMILY": "Multi-Family",
-                         "APARTMENT": "Condo", "LOT": "Land"}
-                    ptype = m.get(ptype.upper(), ptype.title() if ptype else "Single Family")
+                    m = {"SINGLE_FAMILY": "single_family", "CONDO": "condo",
+                         "TOWNHOUSE": "townhouse", "MULTI_FAMILY": "multi_family",
+                         "APARTMENT": "condo", "LOT": "land"}
+                    ptype = m.get(ptype.upper(), ptype.lower().replace(" ", "_") if ptype else "single_family")
 
                 parsed.append({
                     "address_street": str(addr).strip(),
@@ -202,7 +202,7 @@ class ZillowScraper:
                     "list_price": max(int(price) if price else 100000, 100000),
                     "beds": max(beds, 1), "baths": max(baths, 1),
                     "sqft": max(sqft, 500),
-                    "property_type": ptype, "status": "ACTIVE",
+                    "property_type": ptype, "status": "active",
                     "year_built": int(raw.get("yearBuilt", 0)),
                     "lot_size": int(raw.get("lotSizeValue", 0)),
                     "garage_spaces": int(raw.get("garageSpaces", 0)),
