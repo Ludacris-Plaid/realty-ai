@@ -298,10 +298,14 @@ function AthenaPageContent() {
     resizeTextarea();
 
     try {
-      const res = await fetchFromApi<{ response: string; tool_calls?: string; model_used?: string }>("/api/v1/athena/chat", {
+      const body: Record<string, any> = { message: msg };
+      if (conversationId) body.conversation_id = conversationId;
+      const res = await fetchFromApi<{ response: string; tool_calls?: string; model_used?: string; conversation_id?: string }>("/api/v1/athena/chat", {
         method: "POST",
-        body: JSON.stringify({ message: msg }),
+        body: JSON.stringify(body),
       });
+      // Update conversation_id if backend returns one
+      if (res.conversation_id) setConversationId(res.conversation_id);
       setMessages((m) => [...m, {
         role: "assistant",
         content: res.response,

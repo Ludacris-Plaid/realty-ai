@@ -8,7 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Brain, Search, Trash2, Loader2, Database, Zap, RefreshCw, AlertCircle, BookOpen } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/** Inject JWT token from localStorage into fetch headers */
+function authHeaders(): Record<string, string> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("athena_token") : null;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 interface Memory {
   id: string;
@@ -39,8 +45,8 @@ export default function MemoryDashboard() {
     setError("");
     try {
       const [listRes, countRes] = await Promise.all([
-        fetch(`${API_BASE}/athena/memories?limit=50`),
-        fetch(`${API_BASE}/athena/memories/count`),
+        fetch(`${API_BASE}/api/v1/athena/memories?limit=50`, { headers: authHeaders() }),
+        fetch(`${API_BASE}/api/v1/athena/memories/count`, { headers: authHeaders() }),
       ]);
       if (!listRes.ok) throw new Error(`Failed to load memories: ${listRes.status}`);
       if (!countRes.ok) throw new Error(`Failed to load count: ${countRes.status}`);
@@ -67,7 +73,7 @@ export default function MemoryDashboard() {
     }
     setSearching(true);
     try {
-      const res = await fetch(`${API_BASE}/athena/memories/search?query=${encodeURIComponent(searchQuery)}&limit=20`);
+      const res = await fetch(`${API_BASE}/api/v1/athena/memories/search?query=${encodeURIComponent(searchQuery)}&limit=20`, { headers: authHeaders() });
       if (!res.ok) throw new Error(`Search failed: ${res.status}`);
       const data = await res.json();
       setSearchResults(data.memories || []);
@@ -82,7 +88,7 @@ export default function MemoryDashboard() {
     if (!confirm("Delete this memory?")) return;
     setDeletingId(memoryId);
     try {
-      const res = await fetch(`${API_BASE}/athena/memories/${memoryId}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE}/api/v1/athena/memories/${memoryId}`, { method: "DELETE", headers: authHeaders() });
       if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
       setMemories((prev) => prev.filter((m) => m.id !== memoryId));
       setTotalCount((prev) => Math.max(0, prev - 1));

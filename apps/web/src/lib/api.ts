@@ -1,10 +1,22 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/** Inject JWT auth token from localStorage into every request */
+function authHeaders(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const token = localStorage.getItem("athena_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 export async function fetchFromApi<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...authHeaders(),
+    ...(options?.headers as Record<string, string> | undefined),
+  };
   const res = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
+    headers,
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -104,11 +116,14 @@ export interface ActivityItem {
 
 export interface AgentChatRequest {
   message: string;
+  conversation_id?: string;
 }
 
 export interface AgentChatResponse {
   response: string;
   conversation_id?: string;
+  tool_calls?: string;
+  model_used?: string;
 }
 
 function normalizeLead(raw: any): Lead {
@@ -228,9 +243,14 @@ export async function getActivity(): Promise<ActivityItem[]> {
 }
 
 export async function sendChatMessage(req: AgentChatRequest): Promise<AgentChatResponse> {
-  const data = await fetchFromApi<any>("/api/v1/agent/chat", {
+  const data = await fetchFromApi<any>("/api/v1/athena/chat", {
     method: "POST",
     body: JSON.stringify(req),
   });
-  return { response: data.reply || data.response || "" };
+  return {
+    response: data.response || data.reply || "",
+    conversation_id: data.conversation_id,
+    tool_calls: data.tool_calls,
+    model_used: data.model_used,
+  };
 }
