@@ -137,7 +137,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "scrape_properties_advanced",
-        "description": "Advanced property scraping using ALL available sources: Zillow requests + Obscura headless browser + Browser-Use JS rendering + Agent-Reach web search. Gets more results and handles JS-heavy pages that simple requests miss.",
+        "description": "Scrape property listings for a city/area. Works out of the box using Zillow's listing data. Options for advanced sources (Obscura/Browser-Use) are available if installed.",
         "parameters": {"location": {"type": "string", "description": "City/location to scrape (e.g. 'Edmonton, AB')", "required": True}, "max_results": {"type": "integer", "description": "Maximum listings (default 25)", "required": False}}
     },
     {
@@ -1037,22 +1037,27 @@ def _check_scraper_sources() -> str:
     except ImportError:
         return "SuperScraper module not available"
 
-    output = "**Web Scraper Source Status**\n\n"
+    available_count = sum(1 for v in status.values() if v)
+    total_count = len(status)
+    output = f"**Web Scraper Status** — {available_count}/{total_count} sources ready\n\n"
     for name, available in status.items():
-        icon = "✅" if available else "❌"
-        output += f"  {icon} **{name}**\n"
+        icon = "✅" if available else "⏳"
+        note = "" if available else " (optional — not needed for basic scraping)"
+        output += f"  {icon} **{name}**{note}\n"
 
-    output += "\n**Install missing tools:**\n"
-    if not status.get("obscura", False):
-        output += "  • Obscura (Rust headless browser): https://github.com/h4ckf0r0day/obscura\n"
-    if not status.get("browser_use", False):
-        output += "  • Browser-Use (Python): pip install browser-use && playwright install chromium\n"
-    if not status.get("agent_reach", False):
-        output += "  • Agent-Reach (platform connectivity): pip install agent-reach && agent-reach install --env=auto\n"
+    output += "\n**✅ Basic scraping works now** — `zillow_requests` is active and ready to search properties.\n"
+    output += "  Just tell me where and how many listings you need.\n"
+    if total_count - available_count > 0:
+        output += "\n**Optional upgrades** (for stealth/JS-rendered pages):\n"
+        if not status.get("obscura", False):
+            output += "  • Obscura (Rust headless browser): https://github.com/h4ckf0r0day/obscura\n"
+        if not status.get("browser_use", False):
+            output += "  • Browser-Use (Python): pip install browser-use && playwright install chromium (2GB+)\n"
+        if not status.get("agent_reach", False):
+            output += "  • Agent-Reach (platform connectivity): pip install agent-reach\n"
 
-    output += "\n**Hermes Browser Extension (Chrome side panel):**\n"
-    output += "  • https://github.com/abundantbeing/hermes-browser-extension\n"
-    output += "  • Adds real-time browser context capture to Athena"
+    if not status.get("browser_use", False) and not status.get("obscura", False):
+        output += "\n**Tip:** For most MLS listings, the built-in Zillow scraper is all you need."
 
     return output
 
