@@ -38,11 +38,38 @@ logger = logging.getLogger(__name__)
 _built_tools = []
 
 def _make_tool_func(tool_name: str, tool_desc: str):
-    """Create a tool with name set before LangChain's @tool decorator reads it."""
-    func = lambda **kwargs: execute_tool(tool_name, kwargs)
-    func.__name__ = tool_name
-    func.__doc__ = tool_desc
-    return tool(func)
+    """Create an OpenAI-format tool definition dict from TOOL_DEFINITIONS.
+
+    This generates proper parameter schemas so the LLM knows which arguments
+    to provide. Returns a dict, not a LangChain Tool object.
+    """
+    td = next((t for t in TOOL_DEFINITIONS if t["name"] == tool_name), None)
+    params = (td or {}).get("parameters", {})
+
+    # Convert to OpenAI format: {"location": {"type": "string", ...}} → properties
+    properties = {}
+    required = []
+    for pname, pinfo in params.items():
+        ptype = pinfo.get("type", "string")
+        properties[pname] = {
+            "type": ptype,
+            "description": pinfo.get("description", ""),
+        }
+        if pinfo.get("required", False):
+            required.append(pname)
+
+    schema = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = required
+
+    return {
+        "type": "function",
+        "function": {
+            "name": tool_name,
+            "description": tool_desc,
+            "parameters": schema,
+        },
+    }
 
 def _build_tools():
     """Create LangChain Tool objects from tool definitions."""
@@ -377,7 +404,7 @@ class AthenaAgent:
     def chat(self, message: str, user_name: str = "", user_id: str = "") -> dict:
         """Send a message to Athena and get a response. Persists conversation history."""
         profile = profile_summary()
-        tool_names = [t.name for t in self.tools]
+        tool_names = [t.get("function", {}).get("name", "") or getattr(t, "name", "") for t in self.tools]
         tool_calls_used = []
 
         # Scope conversation to this user

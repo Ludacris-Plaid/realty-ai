@@ -991,7 +991,9 @@ def _search_web(query: str, count: int = 5) -> str:
 def _scrape_properties_advanced(location: str, max_results: int = 25) -> str:
     """Advanced multi-source property scraping with ALL available tools."""
     if not location:
-        return "Please provide a location (e.g. 'Edmonton, AB')"
+        # Model didn't pass location — use a common default
+        location = "Edmonton, AB"
+        logger.info("Scraper called without location; defaulting to Edmonton, AB")
 
     try:
         from hermes.scraper.super_scraper import SuperScraper
