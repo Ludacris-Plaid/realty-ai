@@ -30,7 +30,7 @@ COPY packages/bots /packages/bots
 
 # ─── Step 4: Install optional ML packages (graceful fallback if they fail) ──
 RUN pip install --no-cache-dir mem0ai 2>/dev/null || echo "mem0ai skipped (optional)"
-RUN pip install --no-cache-dir sentence-transformers 2>/dev/null || echo "sentence-transformers skipped (optional)"
+RUN pip install --no-cache-dir fastembed 2>/dev/null || echo "fastembed skipped (optional)"
 
 # ─── Step 5: Install scraping tools (browser automation, web reading) ────
 # Obscura — lightweight Rust headless browser (80MB, fast, stealth)
