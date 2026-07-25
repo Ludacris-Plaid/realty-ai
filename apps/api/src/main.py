@@ -47,7 +47,7 @@ from approval import get_pending_approvals, approve as approve_action, reject as
 # ─── Athena Agent ──────────────────────────────────────────────────────────────
 from hermes.agent import get_athena
 from hermes.tools import TOOL_DEFINITIONS
-from hermes.memory import profile_summary, recall, save_note, search_notes, get_skills, search_conversations as search_memory_conversations, get_conversation_messages as get_mem_conversation_messages, list_conversations as list_mem_conversations, get_bot_config, save_bot_config, delete_bot_config, list_bot_configs
+from hermes.memory import profile_summary, get_user_profile, recall, save_note, search_notes, get_skills, search_conversations as search_memory_conversations, get_conversation_messages as get_mem_conversation_messages, list_conversations as list_mem_conversations, get_bot_config, save_bot_config, delete_bot_config, list_bot_configs
 from hermes.mem0_adapter import search_memories as mem0_search_memories, get_all_memories as mem0_get_all_memories, delete_memory as mem0_delete_memory, get_user_memory_count as mem0_memory_count, is_available as mem0_available
 from hermes.tools import TOOL_DEFINITIONS
 
@@ -1015,27 +1015,55 @@ async def remove_bot_config(platform: str, current_user: TokenPayload = Depends(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def _facts_to_memories():
+    """Normalize PostgreSQL athena_facts into the same format Mem0 memories."""
+    profile = get_user_profile()
+    memories = []
+    if profile:
+        for cat, facts in profile.items():
+            for f in facts:
+                memories.append({
+                    "id": f"pg_{cat}_{f['key']}",
+                    "text": f"[{cat}] {f['key']}: {f['value']}",
+                    "metadata": {"category": cat, "key": f.get("key", ""), "confidence": f.get("confidence", 1.0), "source": "postgres"},
+                    "created_at": "",
+                    "importance": f["confidence"],
+                    "categories": [cat],
+                })
+    return memories
+
+
 @app.get("/api/v1/athena/memories")
 async def list_memories(limit: int = 50, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """List all Mem0 memories. Used for the memory dashboard."""
-    if not mem0_available():
-        return {"memories": [], "count": 0, "enabled": False}
-    memories = mem0_get_all_memories(limit=limit)
-    return {"memories": memories, "count": len(memories), "enabled": True}
+    """List all stored memories. Uses Mem0 when available, falls back to PostgreSQL facts."""
+    if mem0_available():
+        memories = mem0_get_all_memories(limit=limit)
+        return {"memories": memories, "count": len(memories), "enabled": True}
+    # Fallback: return PostgreSQL facts
+    memories = _facts_to_memories()
+    return {"memories": memories[:limit], "count": len(memories), "enabled": False}
 
 
 @app.get("/api/v1/athena/memories/search")
 async def search_memories(query: str = "", limit: int = 10, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Semantic search across memories."""
-    if not query or not mem0_available():
+    if not query:
         return {"memories": [], "count": 0}
-    results = mem0_search_memories(query, limit=limit)
-    return {"memories": results, "count": len(results)}
+    if mem0_available():
+        results = mem0_search_memories(query, limit=limit)
+        return {"memories": results, "count": len(results)}
+    # Fallback: keyword filter PostgreSQL facts
+    q = query.lower()
+    memories = _facts_to_memories()
+    filtered = [m for m in memories if q in m["text"].lower()]
+    return {"memories": filtered[:limit], "count": len(filtered)}
 
 
 @app.delete("/api/v1/athena/memories/{memory_id}")
 async def delete_memory(memory_id: str, current_user: TokenPayload = Depends(get_current_user)):
     """Delete a specific memory by ID."""
+    if memory_id.startswith("pg_"):
+        return {"ok": True, "memory_id": memory_id}  # Can't delete PG facts via this endpoint
     if not mem0_available():
         return {"ok": False, "error": "Mem0 not available"}
     ok = mem0_delete_memory(memory_id)
@@ -1045,6 +1073,7 @@ async def delete_memory(memory_id: str, current_user: TokenPayload = Depends(get
 @app.get("/api/v1/athena/memories/count")
 async def memory_count(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Get the count of stored memories."""
-    if not mem0_available():
-        return {"count": 0, "enabled": False}
-    return {"count": mem0_memory_count(), "enabled": True}
+    if mem0_available():
+        return {"count": mem0_memory_count(), "enabled": True}
+    count = len(_facts_to_memories())
+    return {"count": count, "enabled": False}
