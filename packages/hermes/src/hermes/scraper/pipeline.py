@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 
-def scrape_and_seed(location: str = "Edmonton, AB", count: int = 25, db_url: str = "") -> dict:
+def scrape_and_seed(location: str = "Edmonton, AB", count: int = 25, db_url: str = "", user_id: str = "") -> dict:
     """Main entry point: scrape listings and seed the database.
     
     Returns a dict with counts of what was inserted.
@@ -52,13 +52,13 @@ def scrape_and_seed(location: str = "Edmonton, AB", count: int = 25, db_url: str
             l["source"] = "generated"
 
     # Phase 2: Insert properties
-    inserted_props = _insert_properties(engine, listings)
+    inserted_props = _insert_properties(engine, listings, user_id)
 
     # Phase 3: Generate & insert leads
-    inserted_leads = _generate_leads(engine, inserted_props)
+    inserted_leads = _generate_leads(engine, inserted_props, user_id)
 
     # Phase 4: Generate activities
-    inserted_activities = _generate_activities(engine, inserted_props, inserted_leads)
+    inserted_activities = _generate_activities(engine, inserted_props, inserted_leads, user_id)
 
     # Phase 5: Generate campaigns
     inserted_campaigns = _generate_campaigns(engine, inserted_props)
@@ -82,12 +82,10 @@ def scrape_and_seed(location: str = "Edmonton, AB", count: int = 25, db_url: str
     }
 
 
-def _insert_properties(engine, listings: list[dict]) -> int:
+def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
     """Insert scraped properties into the properties table.
-
-    Each call generates new UUIDs so ON CONFLICT never triggers —
-    every scrape session adds fresh properties.
     """
+    aid = agent_id or str(uuid.uuid4())
     with engine.connect() as conn:
         count = 0
         for item in listings:
@@ -102,17 +100,17 @@ def _insert_properties(engine, listings: list[dict]) -> int:
                 })
 
                 sql = """
-                    INSERT INTO properties (id, address_street, address_city, address_state,
+                    INSERT INTO properties (id, agent_id, address_street, address_city, address_state,
                         address_zip, list_price, beds, baths, sqft, property_type, status,
                         year_built, lot_size, garage_spaces, description, features, metadata,
                         created_at, updated_at)
-                    VALUES (:id, :street, :city, :state, :zip, :price, :beds, :baths,
+                    VALUES (:id, :agent_id, :street, :city, :state, :zip, :price, :beds, :baths,
                         :sqft, :ptype, :status, :year, :lot, :garage, :desc,
                         :features, :meta, NOW(), NOW())
                     ON CONFLICT (id) DO NOTHING
                 """
                 conn.execute(text(sql), {
-                    "id": pid, "street": item["address_street"], "city": item["address_city"],
+                    "id": pid, "agent_id": aid, "street": item["address_street"], "city": item["address_city"],
                     "state": item["address_state"], "zip": item["address_zip"],
                     "price": item["list_price"], "beds": item["beds"], "baths": item["baths"],
                     "sqft": item["sqft"], "ptype": item["property_type"], "status": item["status"],
@@ -130,8 +128,9 @@ def _insert_properties(engine, listings: list[dict]) -> int:
         return count
 
 
-def _generate_leads(engine, property_count: int) -> int:
+def _generate_leads(engine, property_count: int, agent_id: str = "") -> int:
     """Generate realistic leads from property data."""
+    aid = agent_id or str(uuid.uuid4())
     first_names = ["James", "Mary", "Robert", "Patricia", "Michael", "Jennifer", "David",
                    "Linda", "William", "Elizabeth", "Richard", "Barbara", "Joseph", "Susan",
                    "Thomas", "Jessica", "Christopher", "Sarah", "Daniel", "Karen", "Matthew",
@@ -222,17 +221,17 @@ def _generate_leads(engine, property_count: int) -> int:
             try:
                 lid = str(uuid.uuid4())
                 sql = """
-                    INSERT INTO leads (id, first_name, last_name, email, phone,
+                    INSERT INTO leads (id, agent_id, first_name, last_name, email, phone,
                         source, status, budget, location_interest, property_type_interest,
                         timeline, pre_approved, ai_score, ai_score_reason, notes,
                         created_at, updated_at)
-                    VALUES (:id, :fn, :ln, :email, :phone, :source, :status,
+                    VALUES (:id, :agent_id, :fn, :ln, :email, :phone, :source, :status,
                         :budget, :location, :ptype, :timeline, :pre, :score,
                         :reason, :notes, NOW(), NOW())
                     ON CONFLICT (id) DO NOTHING
                 """
                 conn.execute(text(sql), {
-                    "id": lid,
+                    "id": lid, "agent_id": aid,
                     "fn": fn, "ln": ln,
                     "email": f"{fn.lower()}.{ln.lower()}@email.com",
                     "phone": f"(555) {random.randint(100,999)}-{random.randint(1000,9999)}",
@@ -255,8 +254,10 @@ def _generate_leads(engine, property_count: int) -> int:
         return count
 
 
-def _generate_activities(engine, prop_count: int, lead_count: int) -> int:
+def _generate_activities(engine, prop_count: int, lead_count: int, user_id: str = "") -> int:
     """Generate realistic activity records."""
+    uid = user_id or str(uuid.uuid4())
+    org_id = str(uuid.uuid4())
     actions = [
         "Analyzed lead pipeline", "Generated listing description", "Scheduled property showing",
         "Qualified new lead", "Sent marketing campaign", "Updated lead status",
@@ -285,13 +286,14 @@ def _generate_activities(engine, prop_count: int, lead_count: int) -> int:
                 sql = """
                     INSERT INTO activities (id, organization_id, user_id, agent_name,
                         action, intent, model_used, status, metadata, created_at)
-                    VALUES (:id, '00000000-0000-0000-0000-000000000001',
-                        '00000000-0000-0000-0000-000000000002', 'Athena',
+                    VALUES (:id, :org_id,
+                        :uid, 'Athena',
                         :action, :intent, 'deepseek-v4-flash-free', 'success',
                         :meta, :created)
                 """
                 conn.execute(text(sql), {
-                    "id": aid, "action": action, "intent": intent,
+                    "id": aid, "org_id": org_id, "uid": uid,
+                    "action": action, "intent": intent,
                     "meta": meta, "created": created,
                 })
                 count += 1
@@ -342,7 +344,6 @@ def _generate_campaigns(engine, prop_count: int) -> int:
                     "audience": audience, "status": status,
                     "created": created,
                 })
-                count += 1
             except Exception:
                 continue
 

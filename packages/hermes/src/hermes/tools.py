@@ -15,10 +15,15 @@ import uuid
 # ─── Database access helper ────────────────────────────────────────────────
 # Engine is set by the API on init
 _engine = None
+_current_user_id = ""
 
 def set_engine(engine):
     global _engine
     _engine = engine
+
+def set_current_user_id(user_id: str):
+    global _current_user_id
+    _current_user_id = user_id
 
 
 # ─── Tool definitions (returned as docstrings for the LLM) ─────────────────
@@ -283,15 +288,28 @@ def _execute_db(sql: str, params: dict = None) -> bool:
 
 def _list_leads(status: Optional[str] = None) -> str:
     try:
+        uid = _current_user_id
         if status:
-            rows = _query_db(
-                "SELECT id, first_name, last_name, email, status, ai_score, budget, created_at FROM leads WHERE status = :s ORDER BY ai_score DESC LIMIT 20",
-                {"s": str(status)}
-            )
+            if uid:
+                rows = _query_db(
+                    "SELECT id, first_name, last_name, email, status, ai_score, budget, created_at FROM leads WHERE status = :s AND agent_id = :uid ORDER BY ai_score DESC LIMIT 20",
+                    {"s": str(status), "uid": uid}
+                )
+            else:
+                rows = _query_db(
+                    "SELECT id, first_name, last_name, email, status, ai_score, budget, created_at FROM leads WHERE status = :s ORDER BY ai_score DESC LIMIT 20",
+                    {"s": str(status)}
+                )
         else:
-            rows = _query_db(
-                "SELECT id, first_name, last_name, email, status, ai_score, budget, created_at FROM leads ORDER BY ai_score DESC LIMIT 20"
-            )
+            if uid:
+                rows = _query_db(
+                    "SELECT id, first_name, last_name, email, status, ai_score, budget, created_at FROM leads WHERE agent_id = :uid ORDER BY ai_score DESC LIMIT 20",
+                    {"uid": uid}
+                )
+            else:
+                rows = _query_db(
+                    "SELECT id, first_name, last_name, email, status, ai_score, budget, created_at FROM leads ORDER BY ai_score DESC LIMIT 20"
+                )
     except Exception as e:
         return f"Error querying leads: {e}"
     
@@ -341,10 +359,17 @@ def _update_lead_status(lead_id: str, status: str) -> str:
 
 def _list_listings(status: Optional[str] = None) -> str:
     try:
+        uid = _current_user_id
         if status:
-            rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type FROM properties WHERE status = :s LIMIT 20", {"s": status})
+            if uid:
+                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type FROM properties WHERE status = :s AND agent_id = :uid LIMIT 20", {"s": status, "uid": uid})
+            else:
+                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type FROM properties WHERE status = :s LIMIT 20", {"s": status})
         else:
-            rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type FROM properties LIMIT 20")
+            if uid:
+                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type FROM properties WHERE agent_id = :uid LIMIT 20", {"uid": uid})
+            else:
+                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type FROM properties LIMIT 20")
     except Exception as e:
         return f"Error: {e}"
     if not rows:
@@ -357,10 +382,17 @@ def _list_listings(status: Optional[str] = None) -> str:
 
 def _get_dashboard_summary() -> str:
     try:
-        d = _query_db("SELECT COUNT(*) as c FROM leads")[0]["c"]
-        l = _query_db("SELECT COUNT(*) as c FROM properties")[0]["c"]
-        h = _query_db("SELECT COUNT(*) as c FROM leads WHERE ai_score >= 80")[0]["c"]
-        a = _query_db("SELECT COUNT(*) as c FROM properties WHERE status = 'ACTIVE'")[0]["c"]
+        uid = _current_user_id
+        if uid:
+            d = _query_db("SELECT COUNT(*) as c FROM leads WHERE agent_id = :uid", {"uid": uid})[0]["c"]
+            l = _query_db("SELECT COUNT(*) as c FROM properties WHERE agent_id = :uid", {"uid": uid})[0]["c"]
+            h = _query_db("SELECT COUNT(*) as c FROM leads WHERE agent_id = :uid AND ai_score >= 80", {"uid": uid})[0]["c"]
+            a = _query_db("SELECT COUNT(*) as c FROM properties WHERE agent_id = :uid AND status = 'ACTIVE'", {"uid": uid})[0]["c"]
+        else:
+            d = _query_db("SELECT COUNT(*) as c FROM leads")[0]["c"]
+            l = _query_db("SELECT COUNT(*) as c FROM properties")[0]["c"]
+            h = _query_db("SELECT COUNT(*) as c FROM leads WHERE ai_score >= 80")[0]["c"]
+            a = _query_db("SELECT COUNT(*) as c FROM properties WHERE status = 'ACTIVE'")[0]["c"]
     except Exception as e:
         return f"Error: {e}"
     return (
@@ -417,10 +449,11 @@ def _launch_campaign(name: str, audience: str = "") -> str:
     """Create a marketing campaign record and return its details."""
     campaign_id = str(uuid.uuid4())
     audience_desc = audience or "all leads"
+    uid = _current_user_id or str(uuid.uuid4())
     
     ok = _execute_db(
-        "INSERT INTO campaigns (id, name, audience, status, created_at) VALUES (:id, :name, :audience, 'active', NOW())",
-        {"id": campaign_id, "name": name, "audience": audience_desc}
+        "INSERT INTO campaigns (id, user_id, name, audience, status, created_at) VALUES (:id, :uid, :name, :audience, 'active', NOW())",
+        {"id": campaign_id, "uid": uid, "name": name, "audience": audience_desc}
     )
     
     lead_count = 0
@@ -520,15 +553,17 @@ def _generate_listing_description(property_id: str, tone: str = "professional") 
 def _schedule_showing(lead_name: str, property_address: str, time: str) -> str:
     """Schedule a property showing, recording it in the DB."""
     showing_id = str(uuid.uuid4())
+    uid = _current_user_id or str(uuid.uuid4())
+    org_id = str(uuid.uuid4())
     
     ok = _execute_db(
         "INSERT INTO activities (id, organization_id, user_id, agent_name, action, intent, status, metadata) "
-        "VALUES (:id, '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', "
-        "'Athena', :action, 'showing', 'pending', :meta)",
+        "VALUES (:id, :org_id, :uid, "
+        "'Athena', :action, 'showing', 'pending', :meta::jsonb)",
         {
-            "id": showing_id,
+            "id": showing_id, "org_id": org_id, "uid": uid,
             "action": f"Schedule showing: {lead_name} @ {property_address} at {time}",
-            "meta": {"lead_name": lead_name, "property": property_address, "time": time},
+            "meta": json.dumps({"lead_name": lead_name, "property": property_address, "time": time}),
         }
     )
     status_note = "📅 Showing recorded in activity log." if ok else "📅 (Showing noted in conversation.)"
@@ -546,7 +581,11 @@ def _schedule_showing(lead_name: str, property_address: str, time: str) -> str:
 
 def _analyze_pipeline() -> str:
     try:
-        rows = _query_db("SELECT first_name, last_name, ai_score, budget, status FROM leads ORDER BY ai_score DESC")
+        uid = _current_user_id
+        if uid:
+            rows = _query_db("SELECT first_name, last_name, ai_score, budget, status FROM leads WHERE agent_id = :uid ORDER BY ai_score DESC", {"uid": uid})
+        else:
+            rows = _query_db("SELECT first_name, last_name, ai_score, budget, status FROM leads ORDER BY ai_score DESC")
     except Exception as e:
         return f"Error: {e}"
     
@@ -584,13 +623,23 @@ def _analyze_pipeline() -> str:
 def _market_snapshot(city: str = "") -> str:
     """Get market snapshot from DB listing data."""
     try:
+        uid = _current_user_id
         if city:
-            rows = _query_db(
-                "SELECT list_price, sqft, address_city, property_type FROM properties WHERE status = 'ACTIVE' AND LOWER(address_city) LIKE :city",
-                {"city": f"%{city.lower()}%"}
-            )
+            if uid:
+                rows = _query_db(
+                    "SELECT list_price, sqft, address_city, property_type FROM properties WHERE status = 'ACTIVE' AND agent_id = :uid AND LOWER(address_city) LIKE :city",
+                    {"uid": uid, "city": f"%{city.lower()}%"}
+                )
+            else:
+                rows = _query_db(
+                    "SELECT list_price, sqft, address_city, property_type FROM properties WHERE status = 'ACTIVE' AND LOWER(address_city) LIKE :city",
+                    {"city": f"%{city.lower()}%"}
+                )
         else:
-            rows = _query_db("SELECT list_price, sqft, address_city, property_type FROM properties WHERE status = 'ACTIVE'")
+            if uid:
+                rows = _query_db("SELECT list_price, sqft, address_city, property_type FROM properties WHERE status = 'ACTIVE' AND agent_id = :uid", {"uid": uid})
+            else:
+                rows = _query_db("SELECT list_price, sqft, address_city, property_type FROM properties WHERE status = 'ACTIVE'")
     except Exception as e:
         return f"Error fetching market data: {e}"
     
@@ -1088,7 +1137,7 @@ def _scrape_and_import(location: str, max_results: int = 25) -> str:
         db_url = os.environ.get("DATABASE_URL", "")
         db_url = db_url.replace("+asyncpg", "").replace("+psycopg", "")
 
-        result = scrape_and_seed(location=location, count=max_results, db_url=db_url)
+        result = scrape_and_seed(location=location, count=max_results, db_url=db_url, user_id=_current_user_id)
 
         parts = [
             f"**Scrape & Import Complete — {location}**",
@@ -1119,9 +1168,15 @@ def _system_overview() -> str:
     
     # DB stats
     try:
-        lead_count = _query_db("SELECT COUNT(*) as c FROM leads")[0]["c"]
-        listing_count = _query_db("SELECT COUNT(*) as c FROM properties")[0]["c"]
-        activity_count = _query_db("SELECT COUNT(*) as c FROM activities")[0]["c"]
+        uid = _current_user_id
+        if uid:
+            lead_count = _query_db("SELECT COUNT(*) as c FROM leads WHERE agent_id = :uid", {"uid": uid})[0]["c"]
+            listing_count = _query_db("SELECT COUNT(*) as c FROM properties WHERE agent_id = :uid", {"uid": uid})[0]["c"]
+            activity_count = _query_db("SELECT COUNT(*) as c FROM activities WHERE user_id = :uid", {"uid": uid})[0]["c"]
+        else:
+            lead_count = _query_db("SELECT COUNT(*) as c FROM leads")[0]["c"]
+            listing_count = _query_db("SELECT COUNT(*) as c FROM properties")[0]["c"]
+            activity_count = _query_db("SELECT COUNT(*) as c FROM activities")[0]["c"]
     except:
         lead_count = listing_count = activity_count = 0
     

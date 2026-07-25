@@ -31,7 +31,7 @@ except ImportError:
 
 # ─── Briefing Sections ──────────────────────────────────────────────────────
 
-def _greeting(agent_name: str = "Sarah") -> str:
+def _greeting(agent_name: str = "") -> str:
     hour = datetime.utcnow().hour
     # Rough UTC-based greeting (could use timezone in production)
     if hour < 12:
@@ -70,7 +70,7 @@ def _listing_briefing() -> dict:
 
 # ─── Briefing Compiler ──────────────────────────────────────────────────────
 
-def generate_briefing(agent_name: str = "Sarah") -> str:
+def generate_briefing(agent_name: str = "") -> str:
     """Generate a complete morning briefing for the agent.
     
     Returns a formatted string with all sections.
@@ -137,10 +137,10 @@ def generate_briefing(agent_name: str = "Sarah") -> str:
     return "\n".join(sections)
 
 
-def get_briefing_data() -> dict:
+def get_briefing_data(agent_name: str = "") -> dict:
     """Return structured briefing data (not formatted text)."""
     return {
-        "greeting": _greeting(),
+        "greeting": _greeting(agent_name),
         "leads": _lead_briefing(),
         "listings": _listing_briefing(),
         "generated_at": datetime.utcnow().isoformat(),

@@ -29,7 +29,7 @@ from .mem0_adapter import (
     get_user_memory_count as mem0_memory_count,
     migrate_from_sqlite,
 )
-from .tools import TOOL_DEFINITIONS, execute_tool, set_engine
+from .tools import TOOL_DEFINITIONS, execute_tool, set_engine, set_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -412,6 +412,10 @@ class AthenaAgent:
         if user_id and user_id != self.user_id:
             self.user_id = user_id
             self.conversation_id = get_or_create_active_conversation(user_id)
+        
+        # Set current user ID for tool execution context
+        if user_id:
+            set_current_user_id(user_id)
         
         # Build user-aware system prompt
         user_context = self._prompt

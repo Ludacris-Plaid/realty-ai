@@ -185,9 +185,10 @@ async def ai_endpoint(query: AIQuery, current_user: Optional[TokenPayload] = Dep
 
 @app.get("/briefing")
 async def daily_briefing(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    name = current_user.name if current_user else ""
     return {
-        "text": generate_briefing(),
-        "data": get_briefing_data(),
+        "text": generate_briefing(agent_name=name),
+        "data": get_briefing_data(agent_name=name),
     }
 
 
@@ -278,7 +279,7 @@ async def seed_database(current_user: TokenPayload = Depends(get_current_user)):
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS campaigns (
                     id UUID PRIMARY KEY, name TEXT NOT NULL,
-                    audience TEXT DEFAULT '', status TEXT DEFAULT 'active',
+                    user_id UUID, audience TEXT DEFAULT '', status TEXT DEFAULT 'active',
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """))
@@ -348,27 +349,27 @@ async def seed_database(current_user: TokenPayload = Depends(get_current_user)):
             session.add(profile)
             
             leads = [
-                Lead(id=uuid.uuid4(), first_name="Mike", last_name="Chen", email="mike.chen@email.com",
+                Lead(id=uuid.uuid4(), agent_id=agent_id, first_name="Mike", last_name="Chen", email="mike.chen@email.com",
                      phone="(555) 111-2222", source="ZILLOW", status="NEW",
                      budget=720000, location_interest="Windermere", property_type_interest="Single Family",
                      timeline="Immediate", pre_approved=True, ai_score=92, ai_score_reason="Cash buyer, pre-approved, immediate timeline",
                      notes="Pre-approved, cash buyer, ready to close.", created_at=datetime.utcnow()),
-                Lead(id=uuid.uuid4(), first_name="John", last_name="Smith", email="john.smith@email.com",
+                Lead(id=uuid.uuid4(), agent_id=agent_id, first_name="John", last_name="Smith", email="john.smith@email.com",
                      phone="(555) 222-3333", source="REFERRAL", status="QUALIFYING",
                      budget=550000, location_interest="Ambleside", property_type_interest="Townhouse",
                      timeline="30 days", pre_approved=True, ai_score=87, ai_score_reason="Pre-approved, referred by past client",
                      notes="Pre-approved, active within 30 days, responds quickly.", created_at=datetime.utcnow()),
-                Lead(id=uuid.uuid4(), first_name="Emily", last_name="Davis", email="emily.davis@email.com",
+                Lead(id=uuid.uuid4(), agent_id=agent_id, first_name="Emily", last_name="Davis", email="emily.davis@email.com",
                      phone="(555) 333-4444", source="WEBSITE", status="QUALIFIED",
                      budget=850000, location_interest="Rutherford", property_type_interest="Single Family",
                      timeline="60 days", pre_approved=True, ai_score=78, ai_score_reason="Referred by past client, pre-approved",
                      notes="Referred by past client, pre-approved, specific requirements.", created_at=datetime.utcnow()),
-                Lead(id=uuid.uuid4(), first_name="Robert", last_name="Wilson", email="robert.wilson@email.com",
+                Lead(id=uuid.uuid4(), agent_id=agent_id, first_name="Robert", last_name="Wilson", email="robert.wilson@email.com",
                      phone="(555) 444-5555", source="REDFIN", status="CONTACTED",
                      budget=620000, location_interest="Keswick", property_type_interest="Duplex",
                      timeline="45 days", pre_approved=False, ai_score=55, ai_score_reason="Attended open house, needs pre-approval",
                      notes="Attended open house, needs pre-approval, moderate interest.", created_at=datetime.utcnow()),
-                Lead(id=uuid.uuid4(), first_name="Sarah", last_name="Johnson", email="sarah.j@email.com",
+                Lead(id=uuid.uuid4(), agent_id=agent_id, first_name="Sarah", last_name="Johnson", email="sarah.j@email.com",
                      phone="(555) 555-6666", source="ZILLOW", status="NEW",
                      budget=350000, location_interest="Laurier Heights", property_type_interest="Condo",
                      timeline="90 days", pre_approved=False, ai_score=45, ai_score_reason="Early stage, no pre-approval yet",
@@ -378,16 +379,16 @@ async def seed_database(current_user: TokenPayload = Depends(get_current_user)):
                 session.add(l)
             
             props = [
-                Property(id=uuid.uuid4(), address_street="123 Main St", address_city="Edmonton", address_state="AB", address_zip="T5J 1A4",
+                Property(id=uuid.uuid4(), agent_id=agent_id, address_street="123 Main St", address_city="Edmonton", address_state="AB", address_zip="T5J 1A4",
                          list_price=549000, beds=4, baths=3, sqft=2200, status="ACTIVE", property_type="Single Family",
                          year_built=2018, garage_spaces=2, lot_size=5200, description="Beautiful 4-bed family home in mature neighborhood."),
-                Property(id=uuid.uuid4(), address_street="456 Oak Ave", address_city="Edmonton", address_state="AB", address_zip="T6H 3K1",
+                Property(id=uuid.uuid4(), agent_id=agent_id, address_street="456 Oak Ave", address_city="Edmonton", address_state="AB", address_zip="T6H 3K1",
                          list_price=425000, beds=3, baths=2, sqft=1500, status="ACTIVE", property_type="Townhouse",
                          year_built=2015, garage_spaces=1, lot_size=2800, description="Modern townhouse with open concept layout."),
-                Property(id=uuid.uuid4(), address_street="789 Pine Cres", address_city="Edmonton", address_state="AB", address_zip="T6W 2P5",
+                Property(id=uuid.uuid4(), agent_id=agent_id, address_street="789 Pine Cres", address_city="Edmonton", address_state="AB", address_zip="T6W 2P5",
                          list_price=725000, beds=5, baths=4, sqft=3100, status="PENDING", property_type="Single Family",
                          year_built=2020, garage_spaces=3, lot_size=6800, description="Spacious executive home in Windermere."),
-                Property(id=uuid.uuid4(), address_street="101 Birch Blvd", address_city="Edmonton", address_state="AB", address_zip="T5R 4E2",
+                Property(id=uuid.uuid4(), agent_id=agent_id, address_street="101 Birch Blvd", address_city="Edmonton", address_state="AB", address_zip="T5R 4E2",
                          list_price=315000, beds=2, baths=1, sqft=950, status="SOLD", property_type="Condo",
                          year_built=2005, garage_spaces=1, lot_size=0, description="Well-maintained condo near downtown."),
             ]
@@ -480,6 +481,7 @@ async def scrape_endpoint(body: ScrapeRequest, current_user: TokenPayload = Depe
             location=body.location,
             count=max(body.count, 5),
             db_url=db_url,
+            user_id=current_user.sub,
         )
         return {"status": "ok", **result}
     except Exception as e:
