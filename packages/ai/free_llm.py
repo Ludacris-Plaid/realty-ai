@@ -72,7 +72,7 @@ FREE_PROVIDERS = [
         "name": "deepseek",
         "base": "https://api.deepseek.com",
         "key_env": "DEEPSEEK_API_KEY",
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-flash",
         "keyless": False,
         "note": "DeepSeek official API. Set DEEPSEEK_API_KEY.",
     },
