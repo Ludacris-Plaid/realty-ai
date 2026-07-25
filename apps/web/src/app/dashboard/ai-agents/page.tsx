@@ -1,131 +1,102 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import { Bot, UserCheck, FileText, BarChart, Megaphone, Search, Shield, Zap, Activity } from "lucide-react";
-import { fetchFromApi } from "@/lib/api";
+import { Brain, Users, Building2, FileText, BarChart, Megaphone, Calendar, Search, Globe, Database, Cpu, Sparkles, UserCheck, Wallet, TrendingUp } from "lucide-react";
 
-const agentMeta: Record<string, { name: string; description: string; icon: React.ElementType; color: string }> = {
-  lead: { name: "Lead Agent", description: "Qualifies leads, scores pipeline, recommends follow-ups", icon: UserCheck, color: "bg-amber-500" },
-  listing: { name: "Listing Agent", description: "Generates MLS descriptions, compares properties", icon: FileText, color: "bg-emerald-500" },
-  marketing: { name: "Marketing Agent", description: "Creates campaigns, social posts, content", icon: Megaphone, color: "bg-amber-500" },
-  transaction: { name: "Transaction Agent", description: "Tracks deadlines, manages contract dates", icon: Shield, color: "bg-amber-500" },
-  document: { name: "Document Agent", description: "Analyzes contracts, extracts key terms", icon: Search, color: "bg-rose-500" },
-  research: { name: "Research Agent", description: "Market trends, neighborhood insights", icon: BarChart, color: "bg-cyan-500" },
-  general: { name: "General Assistant", description: "Handles general questions and requests", icon: Bot, color: "bg-gray-500" },
-};
-
-interface AgentInfo {
-  id: string;
+interface ToolDef {
   name: string;
   description: string;
-  tool_count: number;
+  parameters: Record<string, any>;
 }
 
-export default function AIAgentsPage() {
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
+const toolGroups: Record<string, { icon: React.ElementType; color: string; tools: string[] }> = {
+  "Leads": { icon: Users, color: "bg-amber-500", tools: ["list_leads", "get_lead_detail", "update_lead_status", "score_lead", "analyze_pipeline", "recommend_follow_up"] },
+  "Listings": { icon: Building2, color: "bg-emerald-500", tools: ["list_listings", "generate_listing_description", "property_price_analysis", "scrape_properties_advanced", "scrape_and_import_properties", "check_scraper_sources"] },
+  "Market": { icon: TrendingUp, color: "bg-cyan-500", tools: ["market_snapshot", "compare_neighborhoods", "market_trend_report"] },
+  "Documents": { icon: FileText, color: "bg-rose-500", tools: ["summarize_contract", "extract_deadlines"] },
+  "Marketing": { icon: Megaphone, color: "bg-purple-500", tools: ["launch_campaign"] },
+  "Scheduling": { icon: Calendar, color: "bg-blue-500", tools: ["schedule_showing"] },
+  "Web": { icon: Globe, color: "bg-indigo-500", tools: ["browse_web_page", "search_web"] },
+  "Memory": { icon: Database, color: "bg-teal-500", tools: ["remember_fact", "recall_memory", "save_note"] },
+  "System": { icon: Cpu, color: "bg-gray-500", tools: ["get_dashboard_summary", "get_agent_stats", "system_overview"] },
+};
+
+export default function CapabilitiesPage() {
+  const [tools, setTools] = useState<ToolDef[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedGroup, setExpandedGroup] = useState<string | null>("Leads");
 
   useEffect(() => {
-    fetchFromApi<{ agents: AgentInfo[] }>("/supervisor/agents")
-      .then((d) => setAgents(d.agents || []))
+    fetch("/api/v1/athena/state")
+      .then((r) => r.json())
+      .then((d) => setTools(d.tools || []))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
+  const toolMap = new Map(tools.map((t) => [t.name, t]));
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">AI Agents</h1>
-        <p className="mt-1 text-sm text-gray-500">Specialist AI agents working for your business</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Athena Capabilities</h1>
+          <p className="mt-1 text-sm text-gray-500">{tools.length} tools across 9 categories</p>
+        </div>
+        <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-1.5">
+          <Sparkles className="h-4 w-4 text-amber-600" />
+          <span className="text-sm font-medium text-amber-700">All powered by Athena</span>
+        </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card className="bg-gradient-to-br from-brand-600 to-brand-800 text-white">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3">
-              <Zap className="h-8 w-8" />
-              <div>
-                <p className="text-lg font-bold">Multi-Agent System</p>
-                <p className="text-sm text-white/70">Active · {agents.length} agents deployed</p>
-              </div>
-            </div>
-            <Separator className="my-4 bg-white/20" />
-            <p className="text-sm text-white/80">Intelligent routing: your request is analyzed and sent to the best specialist agent for the job.</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3">
-              <Activity className="h-8 w-8 text-brand-500" />
-              <div>
-                <p className="text-lg font-bold text-gray-900">Agent Activity</p>
-                <p className="text-sm text-gray-500">Real-time actions and decisions</p>
-              </div>
-            </div>
-            <Separator className="my-4" />
-            <p className="text-sm text-gray-500">View the <span className="text-brand-600 font-medium">Activity Feed</span> on the dashboard for a complete log of all agent actions, approvals needed, and completed tasks.</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Specialist Agents</h2>
-        {loading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <Card key={i}><CardContent className="p-6"><div className="h-24 animate-pulse bg-gray-100 rounded" /></CardContent></Card>
-            ))}
-          </div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {agents.map((agent) => {
-              const meta = agentMeta[agent.id] || { name: agent.name, description: agent.description, icon: Bot, color: "bg-gray-500" };
-              const Icon = meta.icon;
-              return (
-                <Card key={agent.id} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex items-center gap-3">
-                      <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${meta.color}`}>
-                        <Icon className="h-5 w-5 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">{meta.name}</p>
-                        <Badge variant="secondary" className="text-[10px]">{agent.tool_count} tools</Badge>
-                      </div>
+      {loading ? (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <Card key={i}><CardContent className="p-6"><div className="h-20 animate-pulse bg-gray-100 rounded" /></CardContent></Card>
+          ))}
+        </div>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Object.entries(toolGroups).map(([group, meta]) => {
+            const Icon = meta.icon;
+            const groupTools = meta.tools.filter((t) => toolMap.has(t));
+            const isExpanded = expandedGroup === group;
+            return (
+              <Card key={group}
+                className={`transition-all cursor-pointer hover:shadow-md ${isExpanded ? "ring-2 ring-brand-200" : ""}`}
+                onClick={() => setExpandedGroup(isExpanded ? null : group)}
+              >
+                <CardContent className="p-5">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${meta.color}`}>
+                      <Icon className="h-5 w-5 text-white" />
                     </div>
-                    <p className="mt-3 text-xs text-gray-500 leading-relaxed">{meta.description}</p>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Agent Configuration</CardTitle>
-          <CardDescription>Control which agents are active and how they behave</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {["Intent Classification", "Model Routing", "Human Approval", "Activity Logging"].map((setting) => (
-              <div key={setting} className="flex items-center justify-between py-2">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">{setting}</p>
-                  <p className="text-xs text-gray-500">Configure how {setting.toLowerCase()} works</p>
-                </div>
-                <Button variant="outline" size="sm">Configure</Button>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">{group}</p>
+                      <Badge variant="secondary" className="text-[10px]">{groupTools.length} tools</Badge>
+                    </div>
+                  </div>
+                  {isExpanded && (
+                    <div className="mt-3 space-y-2 border-t border-gray-100 pt-3">
+                      {groupTools.map((toolName) => {
+                        const td = toolMap.get(toolName);
+                        return (
+                          <div key={toolName} className="rounded-lg bg-gray-50 p-2.5">
+                            <p className="text-xs font-medium text-gray-900">{toolName}</p>
+                            <p className="mt-0.5 text-[11px] text-gray-500 leading-relaxed">{td?.description || ""}</p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

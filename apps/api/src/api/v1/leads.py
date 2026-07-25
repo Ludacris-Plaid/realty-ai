@@ -190,6 +190,31 @@ def create_lead(data: LeadCreate, current_user: TokenPayload = Depends(require_u
                 "updated_at": now,
             },
         )
+
+        score = 50
+        reason_parts = []
+        if data.pre_approved:
+            score += 20
+            reason_parts.append("Pre-approved")
+        if data.timeline in ("immediate", "30_days"):
+            score += 15
+            reason_parts.append(f"Timeline: {data.timeline}")
+        if data.budget and data.budget > 500000:
+            score += 10
+            reason_parts.append(f"Strong budget (${data.budget:,.0f})")
+        if data.status in ("qualified", "appointment_set"):
+            score += 10
+            reason_parts.append(f"Status: {data.status}")
+        if data.source in ("referral",):
+            score += 5
+            reason_parts.append("Referral source")
+        score = min(score, 99)
+        reason = ". ".join(reason_parts) if reason_parts else "Standard scoring"
+
+        session.execute(
+            text("UPDATE leads SET ai_score = :score, ai_score_reason = :reason, ai_score_updated_at = NOW() WHERE id = :id"),
+            {"id": lead_id, "score": score, "reason": reason},
+        )
         session.commit()
 
     return _row_to_dict(_fetch_lead(lead_id))

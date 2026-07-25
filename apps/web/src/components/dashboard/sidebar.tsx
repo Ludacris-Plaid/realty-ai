@@ -7,29 +7,26 @@ import { Avatar } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
   LayoutDashboard, Users, Building2, FileText, Calendar,
-  Megaphone, Bot, BarChart3, Settings, ChevronLeft, Book, Brain,
-  Sparkles, Database, LogOut,
+  Megaphone, Bot, BarChart3, Settings, ChevronLeft, Brain,
+  Sparkles, Database, LogOut, MoreHorizontal,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
-const navItems = [
-  // Athena — always first, always special
+const primaryItems = [
   { label: "Athena", href: "/dashboard/athena", icon: Brain, highlight: true },
-  // Core business
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Leads", href: "/dashboard/leads", icon: Users },
   { label: "Listings", href: "/dashboard/listings", icon: Building2 },
-  { label: "Documents", href: "/dashboard/documents", icon: FileText },
   { label: "Calendar", href: "/dashboard/calendar", icon: Calendar },
-  { label: "Marketing", href: "/dashboard/marketing", icon: Megaphone },
-  // AI & tools
-  { label: "AI Agents", href: "/dashboard/ai-agents", icon: Bot },
-  { label: "Memory", href: "/dashboard/memory", icon: Database },
-  { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+  { label: "Documents", href: "/dashboard/documents", icon: FileText },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
-  { label: "Docs", href: "/docs", icon: Book },
-  // Logout — renders as button, not link
-  { label: "Logout", href: "#logout", icon: LogOut, logout: true },
+];
+
+const moreItems = [
+  { label: "Capabilities", href: "/dashboard/ai-agents", icon: Bot },
+  { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
+  { label: "Marketing", href: "/dashboard/marketing", icon: Megaphone },
+  { label: "Memory", href: "/dashboard/memory", icon: Database },
 ];
 
 export function Sidebar() {
@@ -37,6 +34,7 @@ export function Sidebar() {
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
 
   useEffect(() => {
@@ -85,58 +83,76 @@ export function Sidebar() {
       <Separator className="bg-gray-800" />
 
       <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto">
-        {navItems.map((item) => {
+        {primaryItems.map((item) => {
           const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
           const isAthena = item.highlight;
-          const isLogout = item.logout;
-
           const linkClasses = cn(
             "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
             collapsed && "justify-center px-2",
-            // Active state
             isActive && isAthena && "bg-amber-600 text-white shadow-[0_0_16px_rgba(245,158,11,0.25)]",
-            isActive && !isAthena && !isLogout && "bg-gray-800 text-white",
-            // Inactive state
+            isActive && !isAthena && "bg-gray-800 text-white",
             !isActive && isAthena && "text-amber-300/70 hover:bg-amber-600/10 hover:text-amber-200",
-            !isActive && !isAthena && isLogout && "text-gray-500 hover:text-red-400 hover:bg-gray-800",
-            !isActive && !isAthena && !isLogout && "text-gray-400 hover:bg-gray-800 hover:text-white",
+            !isActive && !isAthena && "text-gray-400 hover:bg-gray-800 hover:text-white",
           );
-
-          if (isLogout) {
-            return (
-              <button
-                key={item.href}
-                onClick={handleLogout}
-                className={linkClasses}
-                title="Log out"
-              >
-                <LogOut className={cn("h-5 w-5 shrink-0")} />
-                {!collapsed && <span>Log out</span>}
-              </button>
-            );
-          }
-
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={linkClasses}
-            >
-              <item.icon className={cn(
-                "h-5 w-5 shrink-0 transition-transform",
-                isAthena && !collapsed && "group-hover:scale-110"
-              )} />
+            <Link key={item.href} href={item.href} className={linkClasses}>
+              <item.icon className="h-5 w-5 shrink-0" />
               {!collapsed && (
                 <span className="flex items-center gap-2">
                   {item.label}
-                  {isAthena && !isActive && (
-                    <Sparkles className="h-3 w-3 text-amber-400/50" />
-                  )}
+                  {isAthena && !isActive && <Sparkles className="h-3 w-3 text-amber-400/50" />}
                 </span>
               )}
             </Link>
           );
         })}
+
+        <button
+          onClick={() => setMoreOpen(!moreOpen)}
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 w-full",
+            collapsed && "justify-center px-2",
+            moreOpen ? "text-white bg-gray-800" : "text-gray-500 hover:bg-gray-800 hover:text-gray-300",
+          )}
+        >
+          <MoreHorizontal className="h-5 w-5 shrink-0" />
+          {!collapsed && <span>More ({moreItems.length})</span>}
+        </button>
+
+        {moreOpen && (
+          <div className="space-y-1 pl-3 border-l border-gray-800 ml-2">
+            {moreItems.map((item) => {
+              const isActive = pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={cn(
+                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200",
+                    collapsed && "justify-center px-2",
+                    isActive ? "bg-gray-800 text-white" : "text-gray-400 hover:bg-gray-800 hover:text-white",
+                  )}
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  {!collapsed && <span>{item.label}</span>}
+                </Link>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Logout */}
+        <button
+          onClick={handleLogout}
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 w-full",
+            collapsed && "justify-center px-2",
+            "text-gray-500 hover:text-red-400 hover:bg-gray-800",
+          )}
+        >
+          <LogOut className="h-5 w-5 shrink-0" />
+          {!collapsed && <span>Log out</span>}
+        </button>
       </nav>
 
       <Separator className="bg-gray-800" />

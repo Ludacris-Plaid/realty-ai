@@ -49,8 +49,9 @@ def _build_embedder_config():
         Fast, free, no API key needed. ~80MB model download on first use.
       - openai: reads OPENAI_API_KEY + OPENAI_BASE_URL
       - ollama: uses local Ollama instance
+      - fastembed: lightweight ONNX provider (no torch needed)
     
-    Falls back to huggingface if available, otherwise openai.
+    Falls back to fastembed if available, then huggingface, then openai.
     """
     from mem0.embeddings.configs import EmbedderConfig
     
@@ -66,29 +67,52 @@ def _build_embedder_config():
                 _hf_available = False
         return _hf_available
     
+    _fe_available = None
+    def _fastembed_available():
+        nonlocal _fe_available
+        if _fe_available is None:
+            try:
+                from fastembed import TextEmbedding  # noqa: F401
+                _fe_available = True
+            except ImportError:
+                _fe_available = False
+        return _fe_available
+    
     provider = os.environ.get("MEM0_EMBEDDER_PROVIDER", "").lower()
     
-    # Auto-detect: prefer huggingface if installed, fallback to openai
+    # Auto-detect: prefer fastembed (lightweight), then huggingface, then openai
     if not provider:
-        provider = "huggingface" if _huggingface_available() else "openai"
+        if _fastembed_available():
+            provider = "fastembed"
+        elif _huggingface_available():
+            provider = "huggingface"
+        else:
+            provider = "openai"
     
-    config = {"model": os.environ.get("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")}
-    dims = 1536
+    config: dict = {}
+    dims = 384
     
     if provider == "ollama":
         config["model"] = os.environ.get("MEM0_EMBEDDER_MODEL", "nomic-embed-text")
         config["embedding_dims"] = int(os.environ.get("MEM0_EMBEDDER_DIMS", "768"))
         dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "768"))
+    elif provider == "fastembed":
+        config["model"] = os.environ.get("MEM0_EMBEDDER_MODEL", "BAAI/bge-small-en-v1.5")
+        dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "384"))
     elif provider == "huggingface":
         config["model"] = os.environ.get("MEM0_EMBEDDER_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-        dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "384"))  # all-MiniLM-L6-v2 → 384d
+        dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "384"))
+    elif provider == "openai":
+        config["model"] = os.environ.get("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")
+        dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "1536"))
     
     return EmbedderConfig(provider=provider, config=config), dims
 
 
 def _build_llm_config():
     """Build LLM config for Mem0 entity extraction.
-    
+
+    Tries DeepSeek first (DEEPSEEK_API_KEY), falls back to OpenAI.
     Provider options (MEM0_LLM_PROVIDER):
       - openai (default): reads OPENAI_API_KEY + OPENAI_BASE_URL
       - ollama: uses local Ollama
@@ -96,7 +120,15 @@ def _build_llm_config():
     from mem0.llms.configs import LlmConfig
     provider = os.environ.get("MEM0_LLM_PROVIDER", "openai").lower()
     model = os.environ.get("MEM0_LLM_MODEL", "gpt-4o-mini" if provider == "openai" else "llama3.2")
-    return LlmConfig(provider=provider, config={"model": model, "temperature": 0.1})
+    config = {"model": model, "temperature": 0.1}
+
+    # Auto-configure DeepSeek when DEEPSEEK_API_KEY is set but OPENAI_API_KEY isn't
+    ds_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if provider == "openai" and ds_key and not os.environ.get("OPENAI_API_KEY"):
+        config["api_key"] = ds_key
+        config["base_url"] = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
+
+    return LlmConfig(provider=provider, config=config)
 
 
 def _create_mem0_instance():
@@ -119,11 +151,10 @@ def _create_mem0_instance():
         class TimeoutError(Exception): pass
         def _handler(signum, frame): raise TimeoutError("Mem0 init timed out")
         signal.signal(signal.SIGALRM, _handler)
-        signal.alarm(12)  # 12-second timeout (generous for ollama model pull)
+        signal.alarm(60)  # 60-second timeout (model download on first run)
 
         try:
             embedder, dims = _build_embedder_config()
-            llm = _build_llm_config()
             
             embed_provider = embedder.provider
             embed_model = embedder.config.get("model", "unknown")
@@ -139,13 +170,13 @@ def _create_mem0_instance():
                     },
                 ),
                 embedder=embedder,
-                llm=llm,
+                llm=LlmConfig(provider="openai", config={"model": "gpt-4o-mini", "temperature": 0.1}),
                 history_db_path=os.path.join(MEM0_DIR, "mem0_history.db"),
                 version="v1.1",
             )
             instance = Memory(config=config)
             signal.alarm(0)
-            logger.info(f"Mem0 initialized (embedder={embed_provider}/{embed_model}, llm_provider={llm.provider}, dims={dims})")
+            logger.info(f"Mem0 initialized (embedder={embed_provider}/{embed_model}, dims={dims})")
             return instance
         except TimeoutError:
             signal.alarm(0)
@@ -200,7 +231,7 @@ def add_interaction(user_message: str, assistant_response: str, user_id: str = D
             messages,
             user_id=user_id,
             metadata=metadata or {"source": "chat"},
-            infer=True,  # Auto-extract entities and relationships
+            infer=False,
         )
         return True
     except Exception as e:

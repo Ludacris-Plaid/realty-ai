@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Bot, Users, Building2, FileText, Calendar, Megaphone, BarChart, Settings } from "lucide-react";
 
 const sections = [
-  { title: "AI Agents", icon: Bot, desc: "How the multi-agent system works — supervisor routing, specialist agents, and model selection.", href: "/docs/agents", color: "bg-blue-50 text-blue-600" },
+  { title: "Athena AI", icon: Bot, desc: "How Athena works — 23 built-in tools, memory system, and natural language control.", href: "/docs/agents", color: "bg-blue-50 text-blue-600" },
   { title: "Managing Leads", icon: Users, desc: "Track, score, and manage your lead pipeline. AI-powered qualification and follow-up recommendations.", href: "/docs/leads", color: "bg-emerald-50 text-emerald-600" },
   { title: "Properties & Listings", icon: Building2, desc: "Create and manage property listings. Generate AI-powered MLS descriptions.", href: "/docs/listings", color: "bg-amber-50 text-amber-600" },
   { title: "Documents & Contracts", icon: FileText, desc: "Upload, analyze, and extract insights from real estate documents using AI.", href: "/docs/documents", color: "bg-rose-50 text-rose-600" },

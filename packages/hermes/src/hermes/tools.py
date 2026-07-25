@@ -95,16 +95,6 @@ TOOL_DEFINITIONS = [
         "parameters": {"title": {"type": "string", "description": "Note title", "required": True}, "body": {"type": "string", "description": "Note body (markdown)", "required": True}, "tags": {"type": "string", "description": "Comma-separated tags", "required": False}}
     },
     {
-        "name": "get_crew_info",
-        "description": "Get info about the CrewAI agents and their current status.",
-        "parameters": {}
-    },
-    {
-        "name": "run_crew",
-        "description": "Run a specialist crew and return its structured output (JSON) to YOU so you stay in control and can act on the data. Pass crew_name (marketing_crew, listing_crew, lead_scoring_crew, transaction_crew, document_crew, research_crew) and input_data as a JSON string with concrete parameters (e.g. {\"address\": \"123 Main St\"}, {\"closing_date\": \"2026-08-01\"}, {\"contract_text\": \"...\"}, {\"city\": \"Calgary\"}). The crew pulls REAL data from the database and returns it for you to summarize, decide, and present.",
-        "parameters": {"crew_name": {"type": "string", "description": "Crew name: marketing_crew, listing_crew, lead_scoring_crew, transaction_crew, document_crew, research_crew", "required": True}, "input_data": {"type": "string", "description": "JSON string of input data for the crew (address / closing_date / contract_text / city etc.)", "required": False}}
-    },
-    {
         "name": "system_overview",
         "description": "Get a complete overview of the entire RealtyAI system: all counts, stats, active processes, agent status, and system health.",
         "parameters": {}
@@ -152,8 +142,29 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "scrape_and_import_properties",
-        "description": "Scrape property listings from Zillow for a city/area and import them into the system as listings with generated leads. Full end-to-end pipeline. Use this when someone wants to scrape AND save properties.",
+        "description": "Scrape property listings from Zillow for a city/area and import them into the system as listings. Full end-to-end pipeline. Use this when someone wants to scrape AND save properties.",
         "parameters": {"location": {"type": "string", "description": "City/location to scrape (e.g. 'Edmonton, AB')", "required": True}, "max_results": {"type": "integer", "description": "Maximum listings to import (default 25)", "required": False}}
+    },
+    # ── Scoring & Analysis Tools ──────────────────────────────────────────
+    {
+        "name": "score_lead",
+        "description": "Score a lead using AI rules: checks pre-approval, timeline, budget, source, and status. Returns score 0-100 with explanation.",
+        "parameters": {"lead_id": {"type": "string", "description": "UUID of the lead to score", "required": True}}
+    },
+    {
+        "name": "recommend_follow_up",
+        "description": "Analyze a lead's stage and suggest the best next action to move them toward closing.",
+        "parameters": {"lead_id": {"type": "string", "description": "UUID of the lead", "required": True}}
+    },
+    {
+        "name": "property_price_analysis",
+        "description": "Compare a property's price against similar properties in the same area. Returns comparable sales, price per sqft analysis, and market position flag (above/at/below market).",
+        "parameters": {"property_id": {"type": "string", "description": "UUID of the property", "required": True}}
+    },
+    {
+        "name": "market_trend_report",
+        "description": "Generate a broader market trend report: active vs pending vs sold counts, median prices by city, top neighborhoods by listing count.",
+        "parameters": {"city": {"type": "string", "description": "City name to analyze (optional, leave empty for all)", "required": False}}
     },
 ]
 
@@ -228,10 +239,6 @@ def execute_tool(name: str, args: dict) -> str:
         path = save_note(args.get("title", ""), args.get("body", ""),
                          args.get("tags", "").split(",") if args.get("tags") else [])
         return f"Note saved: {path}"
-    elif name == "get_crew_info":
-        return _get_crew_info()
-    elif name == "run_crew":
-        return _run_crew(args.get("crew_name", ""), args.get("input_data", "{}"))
     elif name == "market_snapshot":
         return _market_snapshot(args.get("city", ""))
     elif name == "compare_neighborhoods":
@@ -250,6 +257,14 @@ def execute_tool(name: str, args: dict) -> str:
         return _check_scraper_sources()
     elif name == "scrape_and_import_properties":
         return _scrape_and_import(args.get("location", ""), args.get("max_results", 25))
+    elif name == "score_lead":
+        return _score_lead(args.get("lead_id", ""))
+    elif name == "recommend_follow_up":
+        return _recommend_follow_up(args.get("lead_id", ""))
+    elif name == "property_price_analysis":
+        return _property_price_analysis(args.get("property_id", ""))
+    elif name == "market_trend_report":
+        return _market_trend_report(args.get("city", ""))
     else:
         return f"Unknown tool: {name}"
 
@@ -794,186 +809,255 @@ def _extract_deadlines(text: str) -> str:
     return "**Extracted Deadlines & Timelines:**\n\n" + "\n".join(deadlines)
 
 
-def _get_crew_info() -> str:
-    """Return info about available specialists and crew modules."""
-    # Check for CrewAI crew files
-    crew_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "packages", "ai", "crews")
-    crew_files = []
-    if os.path.isdir(crew_dir):
-        crew_files = [f.replace(".py", "") for f in os.listdir(crew_dir) if f.endswith(".py") and not f.startswith("_")]
-    
-    # Specialist agents from the agent registry (always available)
-    specialists = [
-        ("Lead Agent", "Qualifies leads, scores prospects"),
-        ("Marketing Agent", "Campaigns, social posts, content"),
-        ("Listing Agent", "MLS descriptions, comparisons"),
-        ("Transaction Agent", "Deadlines, closing timelines"),
-        ("Document Agent", "Contract analysis, risk flags"),
-        ("Research Agent", "Market trends, neighborhoods"),
-    ]
-    
-    result = "**Specialist Agents (always available):**\n\n"
-    for name, desc in specialists:
-        result += f"  • **{name}** — {desc}\n"
-    
-    if crew_files:
-        result += "\n**CrewAI Modules (specialized multi-agent crews):**\n\n"
-        for c in crew_files:
-            result += f"  • {c}\n"
-        result += "\nUse `run_crew` to execute a crew with input data."
+# ─── Scoring & Analysis Implementations ────────────────────────────────────
+
+
+def _score_lead(lead_id: str) -> str:
+    """Score a lead using rule-based algorithm. Returns 0-100."""
+    if not lead_id:
+        return "Please provide a lead ID."
+    rows = _query_db("SELECT * FROM leads WHERE id = :id", {"id": lead_id})
+    if not rows:
+        return f"No lead found with ID {lead_id}"
+    r = rows[0]
+    score = 0
+    reasons = []
+
+    # Pre-approval bonus
+    if r.get("pre_approved"):
+        score += 20
+        reasons.append("Pre-approved: +20")
+
+    # Timeline urgency
+    tl = (r.get("timeline") or "").lower()
+    if "immediate" in tl or "asap" in tl or "now" in tl:
+        score += 15
+        reasons.append("Immediate timeline: +15")
+    elif "month" in tl:
+        m = re.search(r"(\d+)", tl)
+        if m:
+            n = int(m.group(1))
+            if n <= 3:
+                score += 10
+                reasons.append(f"{n}-month timeline: +10")
+            else:
+                score += 5
+                reasons.append(f"{n}-month timeline: +5")
+
+    # Budget tier
+    budget = float(r.get("budget") or 0)
+    if budget >= 800000:
+        score += 10
+        reasons.append(f"Budget ${budget:,.0f}: +10")
+    elif budget >= 500000:
+        score += 7
+        reasons.append(f"Budget ${budget:,.0f}: +7")
+    elif budget >= 300000:
+        score += 5
+        reasons.append(f"Budget ${budget:,.0f}: +5")
+
+    # Source quality
+    src = (r.get("source") or "").lower()
+    if src in ("referral", "agent_referral"):
+        score += 10
+        reasons.append("Referral source: +10")
+    elif src in ("open_house", "openhouse"):
+        score += 5
+        reasons.append("Open house source: +5")
+    elif src in ("website", "zillow", "realtor_com", "redfin"):
+        score += 3
+        reasons.append("Online source: +3")
+
+    # Status progression
+    st = (r.get("status") or "").upper()
+    if st == "APPOINTMENT_SET":
+        score += 15
+        reasons.append("Appointment set: +15")
+    elif st in ("CONTACTED", "QUALIFIED"):
+        score += 10
+        reasons.append(f"Status {st}: +10")
+
+    score = min(score, 100)
+
+    # Save to DB
+    _execute_db(
+        "UPDATE leads SET ai_score = :score, ai_score_reason = :reason, ai_score_updated_at = NOW() WHERE id = :id",
+        {"score": score, "reason": "; ".join(reasons), "id": lead_id},
+    )
+
+    name = f"{r.get('first_name', '')} {r.get('last_name', '')}".strip()
+    result = f"**Scored: {name or lead_id}** — {score}/100\n\n"
+    result += "\n".join(f"  • {r}" for r in reasons) if reasons else "  No scoring factors found."
+    if score >= 80:
+        result += "\n\n🔥 **Hot lead** — prioritize follow-up today."
+    elif score >= 50:
+        result += "\n\n⚡ **Warm lead** — nurture with relevant content."
     else:
-        result += "\n*CrewAI modules are being set up. Specialist agents above are ready now.*"
-    
+        result += "\n\n❄️ **Cold lead** — re-engage or archive."
     return result
 
 
-import logging as _logging
-_crew_log = _logging.getLogger(__name__)
+def _recommend_follow_up(lead_id: str) -> str:
+    """Analyze lead stage and suggest next action."""
+    if not lead_id:
+        return "Please provide a lead ID."
+    rows = _query_db("SELECT * FROM leads WHERE id = :id", {"id": lead_id})
+    if not rows:
+        return f"No lead found with ID {lead_id}"
+    r = rows[0]
+    score = r.get("ai_score") or 0
+    status = (r.get("status") or "").upper()
+    name = f"{r.get('first_name', '')} {r.get('last_name', '')}".strip() or lead_id
+    budget = float(r.get("budget") or 0)
+    loc = r.get("location_interest") or "their preferred area"
+    ptype = r.get("property_type_interest") or "property"
 
+    result = f"**Follow-Up Recommendation: {name}**\n\n"
+    result += f"Score: {score}/100 | Status: {status}\n"
+    if budget:
+        result += f"Budget: ${budget:,.0f} | Interest: {loc}\n"
+    result += "\n"
 
-def _crew_arg(d: dict, *keys, default=None):
-    """Pull a value from a crew input dict, checking top level and common
-    nested wrappers (property_details / property / input / data)."""
-    for k in keys:
-        if k in d and d[k] not in (None, ""):
-            return d[k]
-    for wrap in ("property_details", "property", "input", "data", "details"):
-        sub = d.get(wrap)
-        if isinstance(sub, dict):
-            for k in keys:
-                if k in sub and sub[k] not in (None, ""):
-                    return sub[k]
-    return default
-
-
-def _format_crew_output(crew_name: str, data, source: str = "crew") -> str:
-    """Render crew data as a JSON block Athena can parse and act on."""
-    import json as _json
-    try:
-        payload = _json.dumps(data, indent=2, default=str)
-    except TypeError:
-        payload = str(data)
-    return f"**Crew '{crew_name}' → {source}**\n\n```json\n{payload}\n```"
-
-
-def _run_specialist_crew(crew_name: str, d: dict) -> str:
-    """Delegate a crew to the real specialist agents, which pull REAL data
-    from the database / generate real content. Returns structured output."""
-    results: dict = {}
-    cn = (crew_name or "").lower()
-
-    if "marketing" in cn:
-        from agents.marketing_agent import create_listing_post, campaign_plan
-        addr = _crew_arg(d, "address", "property_address", "listing_address", "property", "address_street")
-        if addr:
-            results["listing_post"] = create_listing_post.invoke({"address": addr})
-            results["campaign_plan"] = campaign_plan.invoke({"property_address": addr})
-
-    elif "listing" in cn:
-        from agents.listing_agent import generate_mls_description, compare_properties
-        a1 = _crew_arg(d, "address", "address1", "property_address", "property")
-        a2 = _crew_arg(d, "address2")
-        if a1:
-            results["mls_description"] = generate_mls_description.invoke({"address": a1})
-        if a1 and a2:
-            results["comparison"] = compare_properties.invoke({"address1": a1, "address2": a2})
-
-    elif "lead" in cn:
-        from agents.lead_agent import pipeline_summary, qualify_lead
-        results["pipeline"] = pipeline_summary.invoke({})
-        name = _crew_arg(d, "name", "lead_name", "full_name", "client_name")
-        if name:
-            results["lead"] = qualify_lead.invoke({"name": name})
-
-    elif "transaction" in cn:
-        from agents.transaction_agent import analyze_deadlines, generate_reminder
-        cd = _crew_arg(d, "closing_date", "date")
-        if cd:
-            args = {"closing_date": cd}
-            for opt in ("inspection_days", "financing_days"):
-                if opt in d:
-                    args[opt] = d[opt]
-            results["timeline"] = analyze_deadlines.invoke(args)
-        detail = _crew_arg(d, "detail", "reminder_detail")
-        due = _crew_arg(d, "due_date")
-        if detail and due:
-            results["reminder"] = generate_reminder.invoke({
-                "transaction_type": _crew_arg(d, "transaction_type", default="closing") or "closing",
-                "detail": detail, "due_date": due,
-            })
-
-    elif "document" in cn:
-        from agents.document_agent import summarize_contract, extract_deadlines
-        text = _crew_arg(d, "contract_text", "text", "contract", "document_text")
-        if text:
-            results["summary"] = summarize_contract.invoke({"contract_text": text})
-            results["deadlines"] = extract_deadlines.invoke({"contract_text": text})
-
-    elif "research" in cn:
-        from agents.research_agent import market_snapshot, compare_neighborhoods
-        city = _crew_arg(d, "city", "location")
-        if city:
-            results["market_snapshot"] = market_snapshot.invoke({"city": city})
-        n1 = _crew_arg(d, "neighborhood_1", "neighborhood1")
-        n2 = _crew_arg(d, "neighborhood_2", "neighborhood2")
-        if n1 and n2:
-            results["comparison"] = compare_neighborhoods.invoke({
-                "neighborhood_1": n1, "neighborhood_2": n2, "city": city or ""
-            })
-
-    if not results:
-        # Athena still gets a clear, actionable status (never None).
-        results = {
-            "status": "no_data_extracted",
-            "crew": crew_name,
-            "received_keys": list(d.keys()),
-            "hint": "Provide concrete parameters (e.g. address, closing_date, contract_text, city) so the specialist agents can pull data.",
-        }
-
-    return _format_crew_output(crew_name, results, source="Specialist Agents")
-
-
-def _run_crew(crew_name: str, input_data: str = "{}") -> str:
-    """Execute a crew and return its data to Athena.
-
-    Athena is the orchestrator: she calls run_crew and receives the crew's
-    structured output (JSON) so she can decide what to do next. Resolution:
-      1. If a real CrewAI module (crews/<name>) is implemented with run_crew()
-         or a `crew` object, run it and return its output.
-      2. Otherwise delegate to the matching specialist agent(s), which pull
-         REAL data from the database / generate real content.
-    Never returns None.
-    """
-    import json as _json
-    try:
-        input_dict = _json.loads(input_data) if isinstance(input_data, str) else dict(input_data)
-    except (_json.JSONDecodeError, ValueError, TypeError):
-        input_dict = {"input": str(input_data)}
-
-    # ── 1) Real CrewAI crew (if implemented & installed) ───────────────────
-    try:
-        import importlib
-        crew_module = importlib.import_module(f"crews.{crew_name}", package="packages.ai")
-        if hasattr(crew_module, "run_crew"):
-            result = crew_module.run_crew(**input_dict)
-            return _format_crew_output(crew_name, result, source="CrewAI")
-        if hasattr(crew_module, "crew"):
-            result = crew_module.crew.kickoff(inputs=input_dict)
-            return _format_crew_output(crew_name, result, source="CrewAI")
-    except Exception as e:
-        _crew_log.warning(
-            "run_crew: real CrewAI module for '%s' unavailable (%s); using specialist agents",
-            crew_name, e,
+    if score >= 80:
+        result += (
+            "🔥 **Hot Lead — Act Now**\n"
+            f"  → Call {name} today and ask about their timeline\n"
+            f"  → Prepare a list of {ptype} options in {loc}\n"
+            "  → Offer to schedule a showing this week\n"
+        )
+    elif score >= 50:
+        result += (
+            "⚡ **Warm Lead — Nurture**\n"
+            f"  → Send {name} a curated listing alert matching {loc}\n"
+            f"  → Share a market report for {loc}\n"
+            "  → Follow up in 3-5 days with new listings\n"
+        )
+    else:
+        result += (
+            "❄️ **Cold Lead — Re-engage**\n"
+            "  → Send a monthly market newsletter\n"
+            "  → Share recent sold comparables in their area\n"
+            "  → Check back in 2-3 weeks\n"
         )
 
-    # ── 2) Specialist agents (real data) ──────────────────────────────────
-    try:
-        return _run_specialist_crew(crew_name, input_dict)
-    except Exception as e:
-        _crew_log.exception("run_crew: specialist delegation failed for '%s'", crew_name)
-        return _format_crew_output(
-            crew_name, {"error": f"Crew execution failed: {e}"}, source="error"
+    if status in ("NEW", "QUALIFYING"):
+        result += "\n📋 **Next step:** Ask about pre-approval and timeline."
+    elif status == "CONTACTED":
+        result += "\n📋 **Next step:** Share listings matching their criteria."
+    elif status == "APPOINTMENT_SET":
+        result += "\n📋 **Next step:** Confirm showing details and prepare property info."
+
+    return result
+
+
+def _property_price_analysis(property_id: str) -> str:
+    """Compare a property's price against comparable properties."""
+    if not property_id:
+        return "Please provide a property ID."
+    rows = _query_db("SELECT * FROM properties WHERE id = :id", {"id": property_id})
+    if not rows:
+        return f"No property found with ID {property_id}"
+    p = rows[0]
+
+    city = p.get("address_city", "")
+    sqft = float(p.get("sqft") or 0)
+    price = float(p.get("list_price") or 0)
+    addr = f"{p.get('address_street', '')}, {city}"
+
+    ppsf = price / sqft if sqft > 0 else 0
+
+    # Find comparables: same city, ±20% sqft, active/pending
+    margin = 0.20
+    if sqft > 0:
+        comps = _query_db(
+            "SELECT list_price, sqft, address_street, address_city, status FROM properties "
+            "WHERE id != :id AND LOWER(address_city) = LOWER(:city) "
+            "AND status IN ('ACTIVE', 'PENDING') "
+            "AND sqft BETWEEN :min_sqft AND :max_sqft",
+            {"id": property_id, "city": city,
+             "min_sqft": sqft * (1 - margin), "max_sqft": sqft * (1 + margin)},
         )
+    else:
+        comps = []
+
+    result = f"**Price Analysis: {addr}**\n\n"
+    result += f"List Price: ${price:,.0f}\n"
+    result += f"Sqft: {sqft:,.0f} | Price/Sqft: ${ppsf:,.0f}\n"
+    result += f"Status: {p.get('status', '')}\n\n"
+
+    if comps:
+        comp_prices = [float(c["list_price"]) for c in comps if c.get("list_price")]
+        comp_ppsf = []
+        for c in comps:
+            cs = float(c.get("sqft") or 0)
+            cp = float(c.get("list_price") or 0)
+            if cs > 0 and cp > 0:
+                comp_ppsf.append(cp / cs)
+        avg_price = sum(comp_prices) / len(comp_prices) if comp_prices else 0
+        avg_ppsf = sum(comp_ppsf) / len(comp_ppsf) if comp_ppsf else 0
+
+        result += f"Comparables ({len(comps)} similar properties):\n"
+        result += f"  Avg price: ${avg_price:,.0f}\n"
+        result += f"  Avg price/sqft: ${avg_ppsf:,.0f}\n"
+        result += f"  Range: ${min(comp_prices):,.0f} — ${max(comp_prices):,.0f}\n\n"
+
+        diff_pct = ((price - avg_price) / avg_price * 100) if avg_price else 0
+        if diff_pct > 5:
+            result += f"📈 **Above market** ({diff_pct:.0f}% above avg comparables)"
+        elif diff_pct < -5:
+            result += f"📉 **Below market** ({abs(diff_pct):.0f}% below avg comparables)"
+        else:
+            result += f"✅ **At market** (within 5% of avg comparables)"
+    else:
+        result += "No comparable properties found in this area."
+
+    return result
+
+
+def _market_trend_report(city: str = "") -> str:
+    """Generate a market trend report from DB data."""
+    if city:
+        rows = _query_db(
+            "SELECT status, COUNT(*) as cnt, ROUND(AVG(list_price)) as avg_price, "
+            "address_city FROM properties WHERE LOWER(address_city) LIKE :city "
+            "GROUP BY status, address_city ORDER BY cnt DESC",
+            {"city": f"%{city.lower()}%"},
+        )
+    else:
+        rows = _query_db(
+            "SELECT status, COUNT(*) as cnt, ROUND(AVG(list_price)) as avg_price, "
+            "address_city FROM properties GROUP BY status, address_city ORDER BY cnt DESC"
+        )
+
+    if not rows:
+        return f"No market data{' for ' + city if city else ''} found."
+
+    city_label = city or "All Markets"
+    result = f"**Market Trend Report: {city_label}**\n\n"
+
+    # Group by city
+    cities = {}
+    for r in rows:
+        c = r.get("address_city", "Unknown")
+        if c not in cities:
+            cities[c] = {"ACTIVE": 0, "PENDING": 0, "SOLD": 0, "prices": []}
+        st = r.get("status", "").upper()
+        if st in cities[c]:
+            cities[c][st] = r["cnt"]
+        cities[c]["prices"].append(r.get("avg_price") or 0)
+
+    for c, data in sorted(cities.items()):
+        total = sum(data[s] for s in ("ACTIVE", "PENDING", "SOLD"))
+        result += f"**{c}** — {total} total listings\n"
+        result += f"  Active: {data['ACTIVE']} | Pending: {data['PENDING']} | Sold: {data['SOLD']}\n"
+        prices = [p for p in data["prices"] if p]
+        if prices:
+            avg_p = sum(prices) / len(prices)
+            result += f"  Avg price: ${avg_p:,.0f}\n"
+        result += "\n"
+
+    result += "*Data from your local database. Connect MLS for broader coverage.*"
+    return result
 
 
 # ─── Web Browsing Tool Implementations ─────────────────────────────────────

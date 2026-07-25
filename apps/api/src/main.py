@@ -3,10 +3,7 @@ RealtyAI — FastAPI Application.
 
 Endpoints:
   GET  /health              — Health check
-  POST /ai                  — Primary AI endpoint (multi-agent)
   GET  /briefing            — Daily AI Briefing
-  GET  /supervisor/route    — Test supervisor routing
-  GET  /supervisor/agents   — List all specialist agents
   GET  /activity            — AI activity feed
   GET  /activity/stats      — Activity statistics
   GET  /approvals/pending   — Actions needing human approval
@@ -38,9 +35,7 @@ if not os.path.isdir(_pkg_path):
     _pkg_path = "/packages/ai"  # Docker layout
 sys.path.insert(0, _pkg_path)
 
-from agent import ask
 from briefing import generate_briefing, get_briefing_data
-from agents.supervisor import route, AGENT_REGISTRY, classify_intent
 from activity import get_recent_activities, get_activity_stats, record_activity
 from approval import get_pending_approvals, approve as approve_action, reject as reject_action
 
@@ -67,13 +62,6 @@ from .auth import (
 class AIQuery(BaseModel):
     message: str
     override_model: str | None = None
-
-
-class AIResponse(BaseModel):
-    response: str
-    tool_calls: list[str] = []
-    model_used: str = "fast-model"
-    supervisor: dict | None = None
 
 
 class ApprovalAction(BaseModel):
@@ -154,33 +142,6 @@ async def me(current_user = Depends(get_current_user)):
     return current_user
 
 
-# ─── AI ──────────────────────────────────────────────────────────────────────
-
-@app.post("/ai", response_model=AIResponse)
-async def ai_endpoint(query: AIQuery, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """Primary AI endpoint. Routes through the Supervisor to the right specialist.
-    
-    The supervisor classifies intent and routes to:
-      lead, marketing, listing, transaction, document, research, or general.
-    """
-    try:
-        result = ask(query.message, override_model=query.override_model)
-        tool_calls = list(set(
-            tc.get("name", "unknown")
-            for msg in result.get("messages", [])
-            if hasattr(msg, "tool_calls") and msg.tool_calls
-            for tc in msg.tool_calls
-        ))
-        return AIResponse(
-            response=result.get("response", ""),
-            tool_calls=tool_calls,
-            model_used=result.get("model_used", "unknown"),
-            supervisor=result.get("supervisor"),
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 # ─── Briefing ────────────────────────────────────────────────────────────────
 
 @app.get("/briefing")
@@ -189,31 +150,6 @@ async def daily_briefing(current_user: Optional[TokenPayload] = Depends(get_curr
     return {
         "text": generate_briefing(agent_name=name),
         "data": get_briefing_data(agent_name=name),
-    }
-
-
-# ─── Supervisor ──────────────────────────────────────────────────────────────
-
-@app.get("/supervisor/route")
-async def test_route(message: str = "Who are my hottest leads?", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """Test what the supervisor would route a message to."""
-    decision = route(message)
-    intent = classify_intent(message)
-    return {
-        "message": message,
-        "classified_intent": intent,
-        "routed_to": decision.to_dict(),
-    }
-
-
-@app.get("/supervisor/agents")
-async def list_agents(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """List all available specialist agents."""
-    return {
-        "agents": [
-            {"id": k, "name": v["name"], "description": v["description"], "tool_count": len(v["tools"])}
-            for k, v in AGENT_REGISTRY.items()
-        ]
     }
 
 
@@ -808,10 +744,7 @@ async def athena_system_overview(current_user: Optional[TokenPayload] = Depends(
         "ai": {
             "model": os.environ.get("LLM_DEFAULT_MODEL", "unsloth/Llama-3.2-3B-Instruct"),
             "fallback": os.environ.get("LLM_FALLBACK_MODEL", "meta/llama-3.1-8b-instruct"),
-            "agents": [
-                {"id": k, "name": v["name"]}
-                for k, v in AGENT_REGISTRY.items()
-            ] if 'AGENT_REGISTRY' in dir() else [],
+            "agents": [],
         }
     }
 
