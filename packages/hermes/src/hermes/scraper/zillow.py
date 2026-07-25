@@ -255,12 +255,13 @@ class ZillowScraper:
         return m.group(1) if m else ""
 
     def _extract_img(self, line: str) -> str:
-        # Jina Reader format: ![alt](img_url)
-        m = re.search(r'!\[.*?\]\((https://[^\s)]+\.(?:jpg|jpeg|png|webp))\)', line, re.IGNORECASE)
+        m = re.search(r'https://photos\.zillowstatic\.com/[^\s)\]>]+\.(?:jpg|jpeg|png|webp)', line, re.IGNORECASE)
         if m:
-            return m.group(1)
-        m = re.search(r'(https://[^\s)]+\.(?:jpg|jpeg|png|webp))', line, re.IGNORECASE)
-        return m.group(1) if m else ""
+            return m.group(0)
+        m = re.search(r'https://[^\s)\]>]+\.(?:jpg|jpeg|png|webp)', line, re.IGNORECASE)
+        if m:
+            return m.group(0)
+        return ""
 
     def _fallback_listings(self, location: str, count: int) -> list[dict]:
         return []

@@ -725,6 +725,16 @@ async def dashboard_recommendations(current_user: Optional[TokenPayload] = Depen
             category="listings",
         ))
 
+    # Empty state — suggest first scrape
+    if lead_count == 0 and active_listings == 0:
+        recommendations.append(RecommendationOut(
+            title="Welcome! Get started with your first scrape",
+            description="Your database is empty. Scrape property listings from Zillow to populate your dashboard and start building your pipeline.",
+            priority="high",
+            action="scrape_properties_advanced",
+            category="listings",
+        ))
+
     return {"recommendations": recommendations}
 
 

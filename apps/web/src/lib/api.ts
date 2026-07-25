@@ -159,7 +159,17 @@ function normalizeLead(raw: any): Lead {
 }
 
 function normalizeProperty(raw: any): Property {
-  const images = raw.images || [];
+  let images = raw.images || [];
+  if (!Array.isArray(images) && typeof images === "object") {
+    images = images.images || [];
+  }
+  if (typeof images === "string") {
+    try { images = JSON.parse(images); } catch { images = []; }
+    if (!Array.isArray(images) && typeof images === "object") {
+      images = images.images || [];
+    }
+  }
+  if (!Array.isArray(images)) images = [];
   return {
     id: raw.id,
     address: `${raw.address_street || ""}, ${raw.address_city || ""}, ${raw.address_state || ""}`.trim().replace(/^,\s*|,\s*$/g, "") || "",

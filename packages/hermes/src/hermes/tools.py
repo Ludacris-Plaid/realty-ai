@@ -377,17 +377,18 @@ def _list_listings(status: Optional[str] = None) -> str:
         return "No listings found."
     result = f"**Listings ({len(rows)}):**\n\n"
     for r in rows:
-        imgs = r.get("images", {})
-        if isinstance(imgs, str):
+        raw_images = r.get("images", [])
+        if isinstance(raw_images, str):
             try:
                 import json
-                imgs = json.loads(imgs)
-            except (json.JSONDecodeError, TypeError):
-                imgs = {}
-        url = imgs.get("url", "") if isinstance(imgs, dict) else ""
+                raw_images = json.loads(raw_images)
+            except Exception:
+                raw_images = []
+        if isinstance(raw_images, dict):
+            raw_images = raw_images.get("images", [])
+        if not isinstance(raw_images, list):
+            raw_images = []
         result += f"  • {r.get('address_street','')}, {r.get('address_city','')} — ${r.get('list_price',0):,.0f} — {r.get('beds',0)}bd/{r.get('baths',0)}ba/{r.get('sqft',0)}sqft — {r.get('status','')}\n"
-        if url:
-            result += f"    🔗 {url}\n"
     return result
 
 
@@ -1056,62 +1057,57 @@ def _search_web(query: str, count: int = 5) -> str:
 
 
 def _scrape_properties_advanced(location: str, max_results: int = 25) -> str:
-    """Advanced multi-source property scraping with ALL available tools."""
+    """Scrape property listings using Zillow scraper directly."""
     if not location:
-        # Model didn't pass location — use a common default
         location = "Edmonton, AB"
         logger.info("Scraper called without location; defaulting to Edmonton, AB")
 
     try:
-        from hermes.scraper.super_scraper import SuperScraper
-        scraper = SuperScraper()
+        from hermes.scraper.zillow import ZillowScraper
+        scraper = ZillowScraper(delay=0.5)
         listings = scraper.search(location, max_results)
-    except ImportError:
-        return "SuperScraper module not available — use basic `list_listings` instead"
     except Exception as e:
-        logger.warning(f"SuperScraper search failed: {e}")
-        listings = []
+        logger.warning(f"ZillowScraper search failed: {e}")
+        return f"Scraping failed: {e}"
 
     if not listings:
         return f"No listings found for {location}"
 
-    # Count by source
-    sources = {}
-    for p in listings:
-        src = p.get("source", "unknown")
-        sources[src] = sources.get(src, 0) + 1
-
-    source_summary = " | ".join(f"{k}: {v}" for k, v in sources.items())
-
     output = f"**Properties in {location}** ({len(listings)} total)\n"
-    output += f"Sources: {source_summary}\n\n"
+    output += "Source: Zillow (Jina Reader)\n\n"
 
     for i, p in enumerate(listings[:10], 1):
         url = p.get("url", "")
         images = p.get("images", [])
         output += f"{i}. **{p.get('address_street', 'N/A')}**\n"
-        output += f"   💰 ${p.get('list_price', 0):,} | 🛏️ {p.get('beds', 0)}bd | 🛁 {p.get('baths', 0)}ba | 📐 {p.get('sqft', 0)}sqft\n"
-        output += f"   Type: {p.get('property_type', 'N/A')} | Status: {p.get('status', 'N/A')}\n"
+        output += f"   ${p.get('list_price', 0):,} | {p.get('beds', 0)}bd | {p.get('baths', 0)}ba | {p.get('sqft', 0)}sqft\n"
         if images:
             output += f"   ![{p.get('address_street', 'photo')}]({images[0]})\n"
         if url:
-            output += f"   🔗 [View on Zillow]({url})\n"
-        output += "\n"
+            output += f"   [View on Zillow]({url})\n"
 
     if len(listings) > 10:
-        output += f"... and {len(listings) - 10} more properties\n"
+        output += f"\n... and {len(listings) - 10} more properties"
 
     return output.strip()
 
 
 def _check_scraper_sources() -> str:
     """Check which web scraping tools are available on this system."""
+    status = {}
     try:
-        from hermes.scraper.super_scraper import SuperScraper
-        scraper = SuperScraper()
-        status = scraper.check_availability()
-    except ImportError:
-        return "SuperScraper module not available"
+        from hermes.scraper.zillow import ZillowScraper
+        z = ZillowScraper()
+        status["zillow_requests"] = True
+    except Exception:
+        status["zillow_requests"] = False
+
+    try:
+        import httpx
+        resp = httpx.get("https://r.jina.ai/https://example.com", timeout=10)
+        status["jina_reader"] = resp.status_code == 200
+    except Exception:
+        status["jina_reader"] = False
 
     available_count = sum(1 for v in status.values() if v)
     total_count = len(status)

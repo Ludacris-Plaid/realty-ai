@@ -53,13 +53,8 @@ def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
                 url = item.get("url", "")
                 source = item.get("source", "scraper")
                 scraped_at = item.get("scraped_at", "")
-                extra = {"source": source, "scraped_at": scraped_at, "images": images, "url": url}
-                if images:
-                    extra["images"] = images
-                if url:
-                    extra["url"] = url
                 features_json = json.dumps(features)
-                images_json = json.dumps(extra)
+                images_json = json.dumps(images)
 
                 sql = """
                     INSERT INTO properties (id, agent_id, address_street, address_city, address_state,
