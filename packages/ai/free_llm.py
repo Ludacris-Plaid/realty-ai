@@ -69,12 +69,12 @@ NINEROUTER_UPSTREAMS = [
 # 9router and other providers are fallbacks.
 FREE_PROVIDERS = [
     {
-        "name": "deepseek",
-        "base": "https://api.deepseek.com/v1",
-        "key_env": "DEEPSEEK_API_KEY",
+        "name": "opencode",
+        "base": "https://opencode.ai/zen/v1",
+        "key_env": "OPENCODE_ZEN_API_KEY",
         "model": "deepseek-v4-flash",
         "keyless": False,
-        "note": "DeepSeek official API (paid, reliable). Set DEEPSEEK_API_KEY.",
+        "note": "OpenCode AI with user's API key. Set OPENCODE_ZEN_API_KEY.",
     },
     {
         "name": "opencode-zen",
