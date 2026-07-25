@@ -360,30 +360,31 @@ def _update_lead_status(lead_id: str, status: str) -> str:
 def _list_listings(status: Optional[str] = None) -> str:
     try:
         uid = _current_user_id
+        select_cols = "id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type, images"
         if status:
             if uid:
-                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type, metadata FROM properties WHERE status = :s AND agent_id = :uid LIMIT 20", {"s": status, "uid": uid})
+                rows = _query_db(f"SELECT {select_cols} FROM properties WHERE status = :s AND agent_id = :uid LIMIT 20", {"s": status, "uid": uid})
             else:
-                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type, metadata FROM properties WHERE status = :s LIMIT 20", {"s": status})
+                rows = _query_db(f"SELECT {select_cols} FROM properties WHERE status = :s LIMIT 20", {"s": status})
         else:
             if uid:
-                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type, metadata FROM properties WHERE agent_id = :uid LIMIT 20", {"uid": uid})
+                rows = _query_db(f"SELECT {select_cols} FROM properties WHERE agent_id = :uid LIMIT 20", {"uid": uid})
             else:
-                rows = _query_db("SELECT id, address_street, address_city, address_state, list_price, status, beds, baths, sqft, property_type, metadata FROM properties LIMIT 20")
+                rows = _query_db(f"SELECT {select_cols} FROM properties LIMIT 20")
     except Exception as e:
         return f"Error: {e}"
     if not rows:
         return "No listings found."
     result = f"**Listings ({len(rows)}):**\n\n"
     for r in rows:
-        meta = r.get("metadata", {})
-        if isinstance(meta, str):
+        imgs = r.get("images", {})
+        if isinstance(imgs, str):
             try:
                 import json
-                meta = json.loads(meta)
+                imgs = json.loads(imgs)
             except (json.JSONDecodeError, TypeError):
-                meta = {}
-        url = meta.get("url", "") if isinstance(meta, dict) else ""
+                imgs = {}
+        url = imgs.get("url", "") if isinstance(imgs, dict) else ""
         result += f"  • {r.get('address_street','')}, {r.get('address_city','')} — ${r.get('list_price',0):,.0f} — {r.get('beds',0)}bd/{r.get('baths',0)}ba/{r.get('sqft',0)}sqft — {r.get('status','')}\n"
         if url:
             result += f"    🔗 {url}\n"

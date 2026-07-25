@@ -112,8 +112,7 @@ class ZillowScraper:
                 if not sqft:
                     sqft = self._extract_sqft(l)
                 if not addr and self._extract_url(l):
-                    addr_line = re.sub(r'\[|\]', '', l).strip()
-                    addr = addr_line.split("(")[0].strip()
+                    addr = self._extract_addr(l)
                 img = self._extract_img(l)
                 if img and img not in images:
                     images.append(img)
@@ -245,8 +244,13 @@ class ZillowScraper:
 
     def _extract_addr(self, line: str) -> str:
         if re.search(r'\d+\s+\w+', line) and "zillow" not in line.lower():
-            line_clean = re.sub(r'\[|\]', '', line)
-            return line_clean.strip()
+            line_clean = re.sub(r'\[|\]', '', line).strip()
+            addr = line_clean.split("(")[0].strip()
+            # Remove city/state/zip from address if present
+            parts = addr.split(",")
+            if len(parts) > 1:
+                addr = parts[0].strip()
+            return addr
         return ""
 
     def _extract_url(self, line: str) -> str:

@@ -48,23 +48,27 @@ def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
         for item in listings:
             try:
                 pid = str(uuid.uuid4())
-                features_json = json.dumps(item.get("features", []))
-                meta = json.dumps({
-                    "scraped_at": item.get("scraped_at", ""),
-                    "source": item.get("source", "scraper"),
-                    "features": item.get("features", []),
-                    "images": item.get("images", []),
-                    "url": item.get("url", ""),
-                })
+                features = item.get("features", [])
+                images = item.get("images", [])
+                url = item.get("url", "")
+                source = item.get("source", "scraper")
+                scraped_at = item.get("scraped_at", "")
+                extra = {"source": source, "scraped_at": scraped_at, "images": images, "url": url}
+                if images:
+                    extra["images"] = images
+                if url:
+                    extra["url"] = url
+                features_json = json.dumps(features)
+                images_json = json.dumps(extra)
 
                 sql = """
                     INSERT INTO properties (id, agent_id, address_street, address_city, address_state,
                         address_zip, list_price, beds, baths, sqft, property_type, status,
-                        year_built, lot_size, garage_spaces, description, features, metadata,
+                        year_built, lot_size, garage_spaces, description, features, images,
                         created_at, updated_at)
                     VALUES (:id, :agent_id, :street, :city, :state, :zip, :price, :beds, :baths,
                         :sqft, :ptype, :status, :year, :lot, :garage, :desc,
-                        :features, :meta, NOW(), NOW())
+                        :features, :images, NOW(), NOW())
                     ON CONFLICT (id) DO NOTHING
                 """
                 conn.execute(text(sql), {
@@ -75,7 +79,7 @@ def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
                     "sqft": item["sqft"], "ptype": item["property_type"], "status": item["status"],
                     "year": item["year_built"], "lot": item["lot_size"],
                     "garage": item["garage_spaces"], "desc": item["description"],
-                    "features": features_json, "meta": meta,
+                    "features": features_json, "images": images_json,
                 })
                 count += 1
             except Exception as e:
