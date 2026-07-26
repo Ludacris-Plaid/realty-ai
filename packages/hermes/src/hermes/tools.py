@@ -338,7 +338,7 @@ def _list_leads(status: Optional[str] = None) -> str:
     for r in rows:
         score = r.get("ai_score") or 0
         budget = r.get("budget") or 0
-        result += f"  • {r['first_name']} {r['last_name']} — Score: {score}% — Budget: ${budget:,.2f} — Status: {r['status']}\n    Email: {r['email']} | ID: {r['id']}\n"
+        result += f"  • {r['first_name']} {r['last_name']} — Score: {score}% — Budget: ${budget:,.2f} — Status: {r['status']}\n    Email: {r['email']}\n"
     return result
 
 
