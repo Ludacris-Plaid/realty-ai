@@ -233,7 +233,7 @@ def _extract_header(headers: list[dict], name: str) -> str:
 
 MOCK_EMAILS = [
     {
-        "id": "mock_001",
+        "id": "aaaaaaaa-0000-4000-8000-000000000001",
         "gmail_message_id": "msg_001",
         "thread_id": "thread_001",
         "subject": "New property inquiry - 123 Main St",
@@ -249,7 +249,7 @@ MOCK_EMAILS = [
         "ai_draft_reply": "Hi Alice,\n\nYes, 123 Main St is still available! I'd be happy to show it to you. Are you free this Saturday or Sunday? Let me know your preferred time.\n\nBest,\nYour Agent",
     },
     {
-        "id": "mock_002",
+        "id": "aaaaaaaa-0000-4000-8000-000000000002",
         "gmail_message_id": "msg_002",
         "thread_id": "thread_002",
         "subject": "Listing update request for Downtown Condo",
@@ -265,7 +265,7 @@ MOCK_EMAILS = [
         "ai_draft_reply": "Hi Bob,\n\nGreat question! The downtown condo has HOA fees of $450/month which include water, trash, and building maintenance. It comes with one dedicated parking spot in the secured garage.\n\nWould you like to schedule a tour?\n\nBest,\nYour Agent",
     },
     {
-        "id": "mock_003",
+        "id": "aaaaaaaa-0000-4000-8000-000000000003",
         "gmail_message_id": "msg_003",
         "thread_id": "thread_003",
         "subject": "Re: Your mortgage pre-approval",
