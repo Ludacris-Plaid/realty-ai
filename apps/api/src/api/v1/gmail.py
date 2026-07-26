@@ -22,6 +22,7 @@ import uuid
 from email.mime.text import MIMEText
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -376,11 +377,10 @@ async def oauth_callback(code: str = Query(...), state: str = Query(""), error: 
         "name": user_info.get("name", ""),
     })
 
-    return {
-        "status": "connected",
-        "email": user_info.get("email", ""),
-        "message": "Gmail connected successfully! You can close this tab.",
-    }
+    return RedirectResponse(
+        url="https://realty.indicationsmedia.com/dashboard/integrations?connected=gmail",
+        status_code=302,
+    )
 
 
 @router.get("/status")
