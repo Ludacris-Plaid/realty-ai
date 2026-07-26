@@ -1548,7 +1548,7 @@ async def integrations_list(current_user: Optional[TokenPayload] = Depends(get_c
     """List integrations status."""
     return [
         {"id": "int-gmail", "provider": "gmail",
-         "is_active": bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")),
+         "is_active": bool(os.environ.get("GOOGLE_CLIENT_ID", "")),
          "provider_user_id": None, "created_at": ""},
         {"id": "int-twilio", "provider": "twilio",
          "is_active": bool(os.environ.get("TWILIO_ACCOUNT_SID", "")),
@@ -1574,8 +1574,8 @@ async def integrations_disconnect(provider: str, current_user: TokenPayload = De
 async def oauth_google_connect():
     """Get Google OAuth URL."""
     try:
-        client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
-        redirect_uri = os.environ.get("GOOGLE_OAUTH_REDIRECT_URI",
+        client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+        redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI",
             "https://realty-api.indicationsmedia.com/api/v1/gmail/callback")
         scope = "https://www.googleapis.com/auth/gmail.modify"
         auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope={scope}&access_type=offline&prompt=consent"
@@ -1596,10 +1596,10 @@ async def oauth_google_status(current_user: Optional[TokenPayload] = Depends(get
                 text("SELECT email FROM oauth_tokens WHERE provider = 'google' LIMIT 1")
             ).fetchone()
         connected = row is not None
-        configured = bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID", ""))
+        configured = bool(os.environ.get("GOOGLE_CLIENT_ID", ""))
         return {"connected": connected, "configured": configured, "email": row[0] if row else None}
     except Exception:
-        configured = bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID", ""))
+        configured = bool(os.environ.get("GOOGLE_CLIENT_ID", ""))
         return {"connected": False, "configured": configured, "email": None}
 
 
