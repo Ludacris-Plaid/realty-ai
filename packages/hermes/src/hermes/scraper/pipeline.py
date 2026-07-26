@@ -64,10 +64,10 @@ def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
                 sql = """
                     INSERT INTO properties (id, agent_id, address_street, address_city, address_state,
                         address_zip, list_price, beds, baths, sqft, property_type, status,
-                        year_built, lot_size, garage_spaces, description, features, images,
+                        description, features, images,
                         created_at, updated_at)
                     VALUES (:id, :agent_id, :street, :city, :state, :zip, :price, :beds, :baths,
-                        :sqft, :ptype, :status, :year, :lot, :garage, :desc,
+                        :sqft, :ptype, :status, :desc,
                         :features, :images, NOW(), NOW())
                     ON CONFLICT (id) DO NOTHING
                 """
@@ -77,8 +77,7 @@ def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
                     "state": item["address_state"], "zip": item["address_zip"],
                     "price": item["list_price"], "beds": item["beds"], "baths": item["baths"],
                     "sqft": item["sqft"], "ptype": item["property_type"], "status": item["status"],
-                    "year": item["year_built"], "lot": item["lot_size"],
-                    "garage": item["garage_spaces"], "desc": item["description"],
+                    "desc": item["description"],
                     "features": features_json, "images": images_json,
                 })
                 count += 1
