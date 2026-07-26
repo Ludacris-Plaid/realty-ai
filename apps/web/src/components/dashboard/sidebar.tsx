@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import {
-  LayoutDashboard, Users, Building2, FileText, Calendar,
+  LayoutDashboard, Users, Building2, FileText, Calendar, Mail,
   Megaphone, Bot, BarChart3, Settings, ChevronLeft, Brain,
   Sparkles, Database, LogOut, MoreHorizontal,
 } from "lucide-react";
@@ -18,6 +18,7 @@ const primaryItems = [
   { label: "Leads", href: "/dashboard/leads", icon: Users },
   { label: "Listings", href: "/dashboard/listings", icon: Building2 },
   { label: "Calendar", href: "/dashboard/calendar", icon: Calendar },
+  { label: "Email", href: "/dashboard/email", icon: Mail },
   { label: "Documents", href: "/dashboard/documents", icon: FileText },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];

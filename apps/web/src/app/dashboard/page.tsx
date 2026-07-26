@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ActivityFeed } from "@/components/ai/activity-feed";
-import { TrendingUp, TrendingDown, Zap, Flame, DollarSign, Building2, Calendar } from "lucide-react";
+import { TrendingUp, TrendingDown, Zap, Flame, DollarSign, Building2, Calendar, Mail, Inbox, Sparkles as SparklesIcon } from "lucide-react";
 
 const greeting = () => {
   const hour = new Date().getHours();
@@ -228,8 +228,75 @@ export default function DashboardPage() {
               <ActivityFeed />
             </CardContent>
           </Card>
+
+          {/* Email Inbox Widget */}
+          <EmailWidget />
         </div>
       </div>
     </div>
+  );
+}
+
+function EmailWidget() {
+  const [emails, setEmails] = useState<{ id: string; subject: string; sender_name: string; is_unread: boolean; ai_classification: string | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+    const token = localStorage.getItem("athena_token");
+    fetch(`${API_BASE}/api/v1/gmail/emails?limit=3`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => r.json())
+      .then((d) => setEmails(d.emails || []))
+      .catch(() => setEmails([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Inbox className="h-5 w-5 text-brand-500" />
+          Recent Emails
+        </CardTitle>
+        <CardDescription>Latest inbox messages</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {emails.length === 0 ? (
+          <p className="text-sm text-gray-400 py-2 text-center">No emails yet. Sync your inbox from the Email page.</p>
+        ) : (
+          <div className="space-y-3">
+            {emails.map((email) => (
+              <a
+                key={email.id}
+                href="/dashboard/email"
+                className="block rounded-lg border border-gray-100 p-3 hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  {email.is_unread ? (
+                    <Mail className="h-3.5 w-3.5 text-brand-500 shrink-0" />
+                  ) : (
+                    <Mail className="h-3.5 w-3.5 text-gray-300 shrink-0" />
+                  )}
+                  <span className="text-xs font-medium text-gray-700 truncate">{email.sender_name || "Unknown"}</span>
+                </div>
+                <p className={`text-sm mt-1 truncate ${email.is_unread ? "font-medium text-gray-900" : "text-gray-600"}`}>
+                  {email.subject}
+                </p>
+                {email.ai_classification && (
+                  <span className="text-xs text-brand-600 mt-1 inline-block">{email.ai_classification.replace(/_/g, " ")}</span>
+                )}
+              </a>
+            ))}
+            <a href="/dashboard/email" className="block text-center text-xs text-brand-600 hover:text-brand-700 font-medium pt-1">
+              View all emails →
+            </a>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -73,6 +73,13 @@ class ApprovalAction(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Ensure Gmail OAuth + emails tables exist on startup
+    try:
+        from .api.v1.gmail import _ensure_oauth_table, _ensure_emails_table
+        _ensure_oauth_table()
+        _ensure_emails_table()
+    except Exception as e:
+        logger.warning(f"Gmail table init skipped: {e}")
     yield
 
 

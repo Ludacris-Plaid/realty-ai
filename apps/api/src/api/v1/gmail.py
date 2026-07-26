@@ -1,0 +1,693 @@
+"""
+Gmail / Email API — Google OAuth flow + read/sync/draft.
+
+Provides:
+  GET  /gmail/auth-url       — redirect user to Google OAuth consent screen
+  GET  /gmail/callback       — OAuth callback (exchanges code for tokens)
+  GET  /gmail/status         — check if user's Gmail is connected
+  POST /gmail/sync           — fetch latest inbox messages
+  GET  /gmail/emails         — list synced emails
+  GET  /gmail/emails/{id}    — get single email + full body
+  POST /gmail/drafts         — create a draft reply
+  POST /gmail/send           — send a reply immediately
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import os
+import uuid
+from email.mime.text import MIMEText
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+try:
+    from google.oauth2.credentials import Credentials
+    from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
+    HAS_GMAIL_LIB = True
+except ImportError:
+    Credentials = None
+    build = None
+    HttpError = Exception
+    HAS_GMAIL_LIB = False
+
+from ...auth import TokenPayload
+from .deps import require_user, optional_user
+from .db import engine as _shared_engine
+
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["gmail"])
+
+# ─── Schemas ───────────────────────────────────────────────────────────
+
+class EmailOut(BaseModel):
+    id: str
+    thread_id: str
+    subject: str
+    sender: str
+    sender_name: str
+    snippet: str
+    body: str
+    label_ids: list[str]
+    is_unread: bool
+    received_at: str
+    ai_classification: str | None = None
+    ai_suggested_action: str | None = None
+    ai_draft_reply: str | None = None
+
+class DraftRequest(BaseModel):
+    email_id: str
+    reply_body: str
+
+class SendRequest(BaseModel):
+    to: str
+    subject: str
+    body: str
+
+class SyncResponse(BaseModel):
+    status: str
+    synced: int
+    processed: int
+    drafts_created: int
+    message: str
+
+# ─── Helpers ──────────────────────────────────────────────────────────
+
+def _get_google_config():
+    from ...config import settings
+    return {
+        "client_id": os.environ.get("GOOGLE_CLIENT_ID", ""),
+        "client_secret": os.environ.get("GOOGLE_CLIENT_SECRET", ""),
+        "redirect_uri": os.environ.get("GOOGLE_REDIRECT_URI", ""),
+    }
+
+def _get_stored_credentials(user_id: str) -> dict | None:
+    """Load Google OAuth tokens from DB for a user."""
+    with Session(_shared_engine) as session:
+        row = session.execute(
+            text("SELECT tokens FROM google_oauth_tokens WHERE user_id = :uid AND provider = 'gmail'"),
+            {"uid": user_id},
+        ).fetchone()
+    if row:
+        try:
+            return json.loads(row[0])
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+def _store_credentials(user_id: str, tokens: dict):
+    """Persist Google OAuth tokens for a user."""
+    with Session(_shared_engine) as session:
+        existing = session.execute(
+            text("SELECT id FROM google_oauth_tokens WHERE user_id = :uid AND provider = 'gmail'"),
+            {"uid": user_id},
+        ).fetchone()
+        if existing:
+            session.execute(
+                text("UPDATE google_oauth_tokens SET tokens = :tokens, updated_at = NOW() WHERE id = :id"),
+                {"tokens": json.dumps(tokens), "id": existing[0]},
+            )
+        else:
+            session.execute(
+                text("""
+                    INSERT INTO google_oauth_tokens (id, user_id, provider, tokens, created_at, updated_at)
+                    VALUES (:id, :uid, 'gmail', :tokens, NOW(), NOW())
+                """),
+                {"id": str(uuid.uuid4()), "uid": user_id, "tokens": json.dumps(tokens)},
+            )
+        session.commit()
+
+def _ensure_oauth_table():
+    """Create the google_oauth_tokens table if it doesn't exist."""
+    with Session(_shared_engine) as session:
+        session.execute(text("""
+            CREATE TABLE IF NOT EXISTS google_oauth_tokens (
+                id UUID PRIMARY KEY,
+                user_id UUID NOT NULL,
+                provider TEXT NOT NULL DEFAULT 'gmail',
+                tokens JSONB NOT NULL DEFAULT '{}',
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        session.execute(text("CREATE INDEX IF NOT EXISTS idx_oauth_user_provider ON google_oauth_tokens(user_id, provider)"))
+        session.commit()
+
+def _ensure_emails_table():
+    """Create the synced_emails table if it doesn't exist."""
+    with Session(_shared_engine) as session:
+        session.execute(text("""
+            CREATE TABLE IF NOT EXISTS synced_emails (
+                id UUID PRIMARY KEY,
+                user_id UUID NOT NULL,
+                gmail_message_id TEXT NOT NULL,
+                thread_id TEXT,
+                subject TEXT DEFAULT '',
+                sender TEXT DEFAULT '',
+                sender_name TEXT DEFAULT '',
+                snippet TEXT DEFAULT '',
+                body TEXT DEFAULT '',
+                label_ids JSONB DEFAULT '[]',
+                is_unread BOOLEAN DEFAULT true,
+                received_at TIMESTAMPTZ,
+                ai_classification TEXT,
+                ai_suggested_action TEXT,
+                ai_draft_reply TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        session.execute(text("CREATE INDEX IF NOT EXISTS idx_emails_user ON synced_emails(user_id)"))
+        session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_emails_gmail_id ON synced_emails(user_id, gmail_message_id)"))
+        session.commit()
+
+def _refresh_token_if_needed(creds_dict: dict) -> dict | None:
+    """Try to refresh an expired Google access token using the refresh token."""
+    if not HAS_GMAIL_LIB:
+        return None
+    refresh_token = creds_dict.get("refresh_token")
+    if not refresh_token:
+        return None
+    try:
+        creds = Credentials(
+            token=creds_dict.get("access_token", ""),
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=creds_dict.get("client_id", ""),
+            client_secret=creds_dict.get("client_secret", ""),
+            scopes=creds_dict.get("scopes", [
+                "https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/gmail.send",
+                "https://www.googleapis.com/auth/gmail.compose",
+                "https://www.googleapis.com/auth/gmail.modify",
+            ]),
+        )
+        if creds.expired:
+            from google.auth.transport.requests import Request as GoogleRequest
+            creds.refresh(GoogleRequest())
+            return {
+                "access_token": creds.token,
+                "refresh_token": creds.refresh_token or refresh_token,
+                "expires_at": creds.expiry.isoformat() if creds.expiry else None,
+                "client_id": creds_dict.get("client_id", ""),
+                "client_secret": creds_dict.get("client_secret", ""),
+                "scopes": creds_dict.get("scopes", []),
+            }
+    except Exception as e:
+        logger.warning(f"Token refresh failed: {e}")
+    return None
+
+def _decode_body(payload: dict) -> str:
+    """Extract plaintext body from a Gmail message payload."""
+    if "parts" in payload:
+        for part in payload["parts"]:
+            if part.get("mimeType") == "text/plain" and "data" in part.get("body", {}):
+                try:
+                    return base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8", errors="replace")
+                except Exception:
+                    pass
+            if "parts" in part:
+                nested = _decode_body(part)
+                if nested:
+                    return nested
+    if "body" in payload and "data" in payload["body"]:
+        try:
+            return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="replace")
+        except Exception:
+            pass
+    return ""
+
+def _extract_header(headers: list[dict], name: str) -> str:
+    for h in headers:
+        if h.get("name", "").lower() == name.lower():
+            return h.get("value", "")
+    return ""
+
+# ─── Mock data (fallback when no Gmail connected) ──────────────────────
+
+MOCK_EMAILS = [
+    {
+        "id": "mock_001",
+        "gmail_message_id": "msg_001",
+        "thread_id": "thread_001",
+        "subject": "New property inquiry - 123 Main St",
+        "sender": "buyer@example.com",
+        "sender_name": "Alice Johnson",
+        "snippet": "I am interested in the property at 123 Main St. Is it still available? I'd like to schedule a viewing this weekend.",
+        "body": "Hi there,\n\nI am interested in the property at 123 Main St. Is it still available? I'd like to schedule a viewing this weekend.\n\nBest,\nAlice Johnson\n(555) 123-4567",
+        "label_ids": ["INBOX", "UNREAD"],
+        "is_unread": True,
+        "received_at": "2025-01-15T10:30:00Z",
+        "ai_classification": "buyer_lead",
+        "ai_suggested_action": "reply_with_showing",
+        "ai_draft_reply": "Hi Alice,\n\nYes, 123 Main St is still available! I'd be happy to show it to you. Are you free this Saturday or Sunday? Let me know your preferred time.\n\nBest,\nYour Agent",
+    },
+    {
+        "id": "mock_002",
+        "gmail_message_id": "msg_002",
+        "thread_id": "thread_002",
+        "subject": "Listing update request for Downtown Condo",
+        "sender": "client@example.com",
+        "sender_name": "Bob Martinez",
+        "snippet": "Could you send me more details about the downtown listing? I'm particularly interested in HOA fees and parking.",
+        "body": "Hi,\n\nCould you send me more details about the downtown listing? I'm particularly interested in HOA fees and parking.\n\nThanks,\nBob Martinez",
+        "label_ids": ["INBOX"],
+        "is_unread": False,
+        "received_at": "2025-01-14T14:15:00Z",
+        "ai_classification": "follow_up",
+        "ai_suggested_action": "send_details",
+        "ai_draft_reply": "Hi Bob,\n\nGreat question! The downtown condo has HOA fees of $450/month which include water, trash, and building maintenance. It comes with one dedicated parking spot in the secured garage.\n\nWould you like to schedule a tour?\n\nBest,\nYour Agent",
+    },
+    {
+        "id": "mock_003",
+        "gmail_message_id": "msg_003",
+        "thread_id": "thread_003",
+        "subject": "Re: Your mortgage pre-approval",
+        "sender": "lender@bank.com",
+        "sender_name": "Carol Chen",
+        "snippet": "Your client Sarah Mitchell has been pre-approved for up to $650,000. The approval letter is attached.",
+        "body": "Hello,\n\nYour client Sarah Mitchell has been pre-approved for up to $650,000 at 5.75% APR. The official approval letter is attached to this email.\n\nPlease let us know if you need any additional documentation.\n\nBest,\nCarol Chen\nPremier Lending",
+        "label_ids": ["INBOX", "UNREAD"],
+        "is_unread": True,
+        "received_at": "2025-01-13T09:00:00Z",
+        "ai_classification": "pre_approval",
+        "ai_suggested_action": "update_lead_score",
+        "ai_draft_reply": "",
+    },
+]
+
+# ─── Routes ───────────────────────────────────────────────────────────
+
+@router.get("/auth-url")
+def get_auth_url(current_user: TokenPayload = Depends(require_user)):
+    """Generate Google OAuth URL for connecting Gmail."""
+    cfg = _get_google_config()
+    if not cfg["client_id"]:
+        raise HTTPException(status_code=500, detail="Google OAuth not configured (missing GOOGLE_CLIENT_ID)")
+    scopes = [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "openid",
+    ]
+    params = (
+        f"client_id={cfg['client_id']}"
+        f"&redirect_uri={cfg['redirect_uri']}"
+        f"&response_type=code"
+        f"&scope={' '.join(scopes)}"
+        f"&access_type=offline"
+        f"&prompt=consent"
+        f"&state={current_user.sub}"
+    )
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{params}"
+    return {"auth_url": auth_url}
+
+
+@router.get("/callback")
+async def oauth_callback(code: str = Query(...), state: str = Query(""), error: str = Query(None)):
+    """Handle Google OAuth callback — exchange code for tokens and store them."""
+    cfg = _get_google_config()
+    if error:
+        raise HTTPException(status_code=400, detail=f"Google OAuth error: {error}")
+    if not cfg["client_id"] or not cfg["client_secret"]:
+        raise HTTPException(status_code=500, detail="Google OAuth not configured")
+
+    import httpx
+    token_data = {
+        "code": code,
+        "client_id": cfg["client_id"],
+        "client_secret": cfg["client_secret"],
+        "redirect_uri": cfg["redirect_uri"],
+        "grant_type": "authorization_code",
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post("https://oauth2.googleapis.com/token", data=token_data)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=400, detail=f"Token exchange failed: {resp.text}")
+        tokens = resp.json()
+
+    # Fetch user email from Google
+    user_info = {}
+    if "access_token" in tokens:
+        async with httpx.AsyncClient() as client:
+            info_resp = await client.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {tokens['access_token']}"},
+            )
+            if info_resp.status_code == 200:
+                user_info = info_resp.json()
+
+    # Store credentials keyed by the user_id from OAuth state
+    try:
+        from ...auth import decode_token
+        payload = decode_token(state)
+        user_id = payload.sub
+    except Exception:
+        if "email" in user_info:
+            from ...auth import get_user_by_email
+            user = await get_user_by_email(user_info["email"])
+            user_id = user["id"] if user else state
+        else:
+            user_id = state
+
+    _store_credentials(user_id, {
+        "access_token": tokens["access_token"],
+        "refresh_token": tokens.get("refresh_token", ""),
+        "expires_at": None,
+        "client_id": cfg["client_id"],
+        "client_secret": cfg["client_secret"],
+        "scopes": tokens.get("scope", "").split(),
+        "email": user_info.get("email", ""),
+        "name": user_info.get("name", ""),
+    })
+
+    return {
+        "status": "connected",
+        "email": user_info.get("email", ""),
+        "message": "Gmail connected successfully! You can close this tab.",
+    }
+
+
+@router.get("/status")
+def gmail_status(current_user: TokenPayload = Depends(require_user)):
+    """Check if the current user has Gmail connected."""
+    creds = _get_stored_credentials(current_user.sub)
+    if not creds:
+        return {"connected": False, "email": None}
+
+    # Try refreshing if expired
+    refreshed = _refresh_token_if_needed(creds)
+    if refreshed:
+        _store_credentials(current_user.sub, refreshed)
+        creds = refreshed
+
+    return {
+        "connected": True,
+        "email": creds.get("email", ""),
+        "name": creds.get("name", ""),
+        "has_refresh_token": bool(creds.get("refresh_token")),
+    }
+
+
+@router.post("/sync", response_model=SyncResponse)
+def sync_emails(current_user: TokenPayload = Depends(require_user)):
+    """Sync latest Gmail inbox messages, then auto-classify them."""
+    creds = _get_stored_credentials(current_user.sub)
+    if not creds:
+        # Return mock sync result when not connected
+        _ensure_emails_table()
+        count = 0
+        with Session(_shared_engine) as session:
+            for mock in MOCK_EMAILS:
+                existing = session.execute(
+                    text("SELECT id FROM synced_emails WHERE user_id = :uid AND gmail_message_id = :gid"),
+                    {"uid": current_user.sub, "gid": mock["gmail_message_id"]},
+                ).fetchone()
+                if not existing:
+                    session.execute(
+                        text("""
+                            INSERT INTO synced_emails
+                                (id, user_id, gmail_message_id, thread_id, subject, sender, sender_name,
+                                 snippet, body, label_ids, is_unread, received_at,
+                                 ai_classification, ai_suggested_action, ai_draft_reply, created_at)
+                            VALUES
+                                (:id, :uid, :gid, :tid, :subj, :sender, :sname,
+                                 :snippet, :body, :labels, :unread, :received,
+                                 :classification, :action, :draft, NOW())
+                        """),
+                        {
+                            "id": mock["id"],
+                            "uid": current_user.sub,
+                            "gid": mock["gmail_message_id"],
+                            "tid": mock["thread_id"],
+                            "subj": mock["subject"],
+                            "sender": mock["sender"],
+                            "sname": mock["sender_name"],
+                            "snippet": mock["snippet"],
+                            "body": mock["body"],
+                            "labels": json.dumps(mock["label_ids"]),
+                            "unread": mock["is_unread"],
+                            "received": mock["received_at"],
+                            "classification": mock.get("ai_classification"),
+                            "action": mock.get("ai_suggested_action"),
+                            "draft": mock.get("ai_draft_reply", ""),
+                        },
+                    )
+                    count += 1
+            session.commit()
+        return SyncResponse(
+            status="mock",
+            synced=count,
+            processed=count,
+            drafts_created=sum(1 for m in MOCK_EMAILS if m.get("ai_draft_reply")),
+            message=f"Mock sync complete. {count} emails synced.",
+        )
+
+    # Real Gmail sync
+    if not HAS_GMAIL_LIB:
+        return SyncResponse(status="error", synced=0, processed=0, drafts_created=0, message="Gmail library not available")
+
+    # Refresh if needed
+    refreshed = _refresh_token_if_needed(creds)
+    if refreshed:
+        _store_credentials(current_user.sub, refreshed)
+        creds = refreshed
+
+    try:
+        gcred = Credentials(
+            token=creds["access_token"],
+            refresh_token=creds.get("refresh_token", ""),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+            scopes=creds.get("scopes", []),
+        )
+        service = build("gmail", "v1", credentials=gcred)
+        results = service.users().messages().list(userId="me", maxResults=25, q="in:inbox").execute()
+        messages = results.get("messages", [])
+
+        _ensure_emails_table()
+        synced_count = 0
+
+        for msg_summary in messages:
+            full = service.users().messages().get(userId="me", id=msg_summary["id"], format="full").execute()
+            headers = full.get("payload", {}).get("headers", [])
+            subject = _extract_header(headers, "Subject")
+            sender = _extract_header(headers, "From")
+            sender_name = _extract_header(headers, "From")
+            received_raw = _extract_header(headers, "Date")
+            ebody = _decode_body(full.get("payload", {}))
+            snippet = full.get("snippet", "")
+            label_ids = full.get("labelIds", [])
+            is_unread = "UNREAD" in label_ids
+            internal_date = full.get("internalDate", "")
+
+            with Session(_shared_engine) as session:
+                existing = session.execute(
+                    text("SELECT id FROM synced_emails WHERE user_id = :uid AND gmail_message_id = :gid"),
+                    {"uid": current_user.sub, "gid": full["id"]},
+                ).fetchone()
+                if existing:
+                    session.execute(
+                        text("""
+                            UPDATE synced_emails SET subject=:subj, snippet=:snippet, body=:body,
+                                label_ids=:labels, is_unread=:unread, received_at=:received
+                            WHERE id=:id
+                        """),
+                        {
+                            "id": existing[0], "subj": subject, "snippet": snippet,
+                            "body": ebody, "labels": json.dumps(label_ids),
+                            "unread": is_unread, "received": internal_date,
+                        },
+                    )
+                else:
+                    email_id = str(uuid.uuid4())
+                    session.execute(
+                        text("""
+                            INSERT INTO synced_emails
+                                (id, user_id, gmail_message_id, thread_id, subject, sender, sender_name,
+                                 snippet, body, label_ids, is_unread, received_at, created_at)
+                            VALUES
+                                (:id, :uid, :gid, :tid, :subj, :sender, :sname,
+                                 :snippet, :body, :labels, :unread, :received, NOW())
+                        """),
+                        {
+                            "id": email_id, "uid": current_user.sub,
+                            "gid": full["id"], "tid": full.get("threadId", ""),
+                            "subj": subject, "sender": sender, "sname": sender_name,
+                            "snippet": snippet, "body": ebody,
+                            "labels": json.dumps(label_ids), "unread": is_unread,
+                            "received": internal_date,
+                        },
+                    )
+                    synced_count += 1
+            session.commit()
+        return SyncResponse(
+            status="ok",
+            synced=synced_count,
+            processed=synced_count,
+            drafts_created=0,
+            message=f"Synced {synced_count} new emails from Gmail.",
+        )
+
+    except HttpError as e:
+        logger.error(f"Gmail sync error: {e}")
+        return SyncResponse(status="error", synced=0, processed=0, drafts_created=0, message=str(e))
+
+
+@router.get("/emails")
+def list_emails(
+    limit: int = Query(20, ge=1, le=100),
+    unread_only: bool = Query(False),
+    classification: str = Query(None),
+    current_user: TokenPayload = Depends(require_user),
+):
+    """List synced emails for the current user."""
+    _ensure_emails_table()
+    query = "SELECT * FROM synced_emails WHERE user_id = :uid"
+    params: dict = {"uid": current_user.sub}
+    if unread_only:
+        query += " AND is_unread = true"
+    if classification:
+        query += " AND ai_classification = :cls"
+        params["cls"] = classification
+    query += " ORDER BY received_at DESC NULLS LAST, created_at DESC LIMIT :limit"
+    params["limit"] = limit
+
+    with Session(_shared_engine) as session:
+        rows = session.execute(text(query), params).fetchall()
+
+    emails = []
+    for r in rows:
+        label_ids_raw = r.label_ids if hasattr(r, "label_ids") else "[]"
+        try:
+            labels = json.loads(label_ids_raw) if isinstance(label_ids_raw, str) else label_ids_raw
+        except (json.JSONDecodeError, TypeError):
+            labels = []
+        emails.append(EmailOut(
+            id=str(r.id),
+            thread_id=r.thread_id or "",
+            subject=r.subject or "",
+            sender=r.sender or "",
+            sender_name=r.sender_name or "",
+            snippet=r.snippet or "",
+            body=r.body or "",
+            label_ids=labels,
+            is_unread=bool(r.is_unread),
+            received_at=r.received_at.isoformat() if r.received_at else "",
+            ai_classification=r.ai_classification,
+            ai_suggested_action=r.ai_suggested_action,
+            ai_draft_reply=r.ai_draft_reply,
+        ))
+
+    return {"emails": emails, "total": len(emails)}
+
+
+@router.get("/emails/{email_id}")
+def get_email(email_id: str, current_user: TokenPayload = Depends(require_user)):
+    """Get a single synced email by ID."""
+    _ensure_emails_table()
+    with Session(_shared_engine) as session:
+        row = session.execute(
+            text("SELECT * FROM synced_emails WHERE id = :id AND user_id = :uid"),
+            {"id": email_id, "uid": current_user.sub},
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Email not found")
+    label_ids_raw = row.label_ids if hasattr(row, "label_ids") else "[]"
+    try:
+        labels = json.loads(label_ids_raw) if isinstance(label_ids_raw, str) else label_ids_raw
+    except (json.JSONDecodeError, TypeError):
+        labels = []
+    return EmailOut(
+        id=str(row.id),
+        thread_id=row.thread_id or "",
+        subject=row.subject or "",
+        sender=row.sender or "",
+        sender_name=row.sender_name or "",
+        snippet=row.snippet or "",
+        body=row.body or "",
+        label_ids=labels,
+        is_unread=bool(row.is_unread),
+        received_at=row.received_at.isoformat() if row.received_at else "",
+        ai_classification=row.ai_classification,
+        ai_suggested_action=row.ai_suggested_action,
+        ai_draft_reply=row.ai_draft_reply,
+    )
+
+
+@router.post("/drafts")
+def create_draft(body: DraftRequest, current_user: TokenPayload = Depends(require_user)):
+    """Create a draft reply for an email."""
+    creds = _get_stored_credentials(current_user.sub)
+    if creds and HAS_GMAIL_LIB:
+        refreshed = _refresh_token_if_needed(creds)
+        if refreshed:
+            _store_credentials(current_user.sub, refreshed)
+            creds = refreshed
+        try:
+            gcred = Credentials(
+                token=creds["access_token"],
+                refresh_token=creds.get("refresh_token", ""),
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=creds["client_id"],
+                client_secret=creds["client_secret"],
+            )
+            service = build("gmail", "v1", credentials=gcred)
+            msg = MIMEText(body.reply_body)
+            msg["To"] = ""
+            msg["Subject"] = ""
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            draft = service.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
+            return {"status": "ok", "draft_id": draft["id"]}
+        except HttpError as e:
+            logger.error(f"Gmail draft error: {e}")
+
+    # Mock fallback
+    with Session(_shared_engine) as session:
+        session.execute(
+            text("UPDATE synced_emails SET ai_draft_reply = :draft WHERE id = :id AND user_id = :uid"),
+            {"id": body.email_id, "uid": current_user.sub, "draft": body.reply_body},
+        )
+        session.commit()
+    return {"status": "ok", "draft_id": f"draft_mock_{uuid.uuid4().hex[:8]}", "mock": True}
+
+
+@router.post("/send")
+def send_email(body: SendRequest, current_user: TokenPayload = Depends(require_user)):
+    """Send an email immediately via Gmail."""
+    creds = _get_stored_credentials(current_user.sub)
+    if not creds or not HAS_GMAIL_LIB:
+        return {"status": "mock_sent", "to": body.to, "subject": body.subject, "mock": True}
+
+    refreshed = _refresh_token_if_needed(creds)
+    if refreshed:
+        _store_credentials(current_user.sub, refreshed)
+        creds = refreshed
+
+    try:
+        gcred = Credentials(
+            token=creds["access_token"],
+            refresh_token=creds.get("refresh_token", ""),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+        )
+        service = build("gmail", "v1", credentials=gcred)
+        msg = MIMEText(body.body)
+        msg["To"] = body.to
+        msg["Subject"] = body.subject
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        sent = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        return {"status": "ok", "id": sent["id"], "to": body.to, "thread_id": sent.get("threadId", "")}
+    except HttpError as e:
+        raise HTTPException(status_code=400, detail=f"Failed to send: {e}")

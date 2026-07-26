@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Bot, Bell, Shield, CreditCard, Globe, Palette, Webhook, Key, Save, User, Building2, Eye, EyeOff, CheckCircle, XCircle, RefreshCw, Loader2 } from "lucide-react";
+import { Bot, Bell, Shield, CreditCard, Globe, Palette, Webhook, Key, Save, User, Building2, Eye, EyeOff, CheckCircle, XCircle, RefreshCw, Loader2, ExternalLink, Mail } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
@@ -39,6 +39,38 @@ export default function SettingsPage() {
       }
     } catch { /* ignore */ }
   }, []);
+
+  // ─── Gmail state ───────────────────────────────────────────────────────────
+  const [gmailConnected, setGmailConnected] = useState(false);
+  const [gmailEmail, setGmailEmail] = useState("");
+
+  useEffect(() => {
+    fetch(`${API_BASE.replace("/api/v1", "")}/api/v1/gmail/status`, {
+      headers: localStorage.getItem("athena_token")
+        ? { Authorization: `Bearer ${localStorage.getItem("athena_token")}` }
+        : {},
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        setGmailConnected(d.connected);
+        setGmailEmail(d.email || "");
+      })
+      .catch(() => {});
+  }, []);
+
+  const connectGmail = async () => {
+    try {
+      const res = await fetch(`${API_BASE.replace("/api/v1", "")}/api/v1/gmail/auth-url`, {
+        headers: localStorage.getItem("athena_token")
+          ? { Authorization: `Bearer ${localStorage.getItem("athena_token")}` }
+          : {},
+      });
+      const { auth_url } = await res.json();
+      window.open(auth_url, "_blank", "width=600,height=700");
+    } catch (e) {
+      console.error("Failed to get Gmail auth URL:", e);
+    }
+  };
 
   // ─── Bot integration state ─────────────────────────────────────────────────
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
@@ -504,15 +536,23 @@ export default function SettingsPage() {
             <CardContent className="space-y-4">
               {[
                 { name: "Google Calendar", connected: false },
-                { name: "Gmail", connected: false },
+                { name: "Gmail", connected: gmailConnected },
                 { name: "Twilio SMS", connected: false },
                 { name: "MLS Sync", connected: false },
               ].map((int) => (
                 <div key={int.name} className="flex items-center justify-between">
                   <span className="text-sm text-gray-700">{int.name}</span>
-                  <Badge variant={int.connected ? "success" : "default"}>
-                    {int.connected ? "Connected" : "Connect"}
-                  </Badge>
+                  {int.name === "Gmail" && int.connected ? (
+                    <Badge variant="success">Connected</Badge>
+                  ) : int.name === "Gmail" && !int.connected ? (
+                    <Button variant="outline" size="sm" onClick={connectGmail} className="h-7 text-xs">
+                      <ExternalLink className="h-3 w-3" /> Connect
+                    </Button>
+                  ) : (
+                    <Badge variant={int.connected ? "success" : "default"}>
+                      {int.connected ? "Connected" : "Connect"}
+                    </Badge>
+                  )}
                 </div>
               ))}
               <Separator />

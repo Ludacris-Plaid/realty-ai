@@ -252,6 +252,72 @@ export async function getActivity(): Promise<ActivityItem[]> {
   }));
 }
 
+// ─── Gmail / Email API ──────────────────────────────────────────────────
+
+export interface EmailMessage {
+  id: string;
+  thread_id: string;
+  subject: string;
+  sender: string;
+  sender_name: string;
+  snippet: string;
+  body: string;
+  label_ids: string[];
+  is_unread: boolean;
+  received_at: string;
+  ai_classification: string | null;
+  ai_suggested_action: string | null;
+  ai_draft_reply: string | null;
+}
+
+export interface SyncResult {
+  status: string;
+  synced: number;
+  processed: number;
+  drafts_created: number;
+  message: string;
+}
+
+export interface GmailStatus {
+  connected: boolean;
+  email: string | null;
+  name?: string;
+  has_refresh_token?: boolean;
+}
+
+export const gmailApi = {
+  status: (): Promise<GmailStatus> =>
+    fetchFromApi("/api/v1/gmail/status"),
+
+  authUrl: (): Promise<{ auth_url: string }> =>
+    fetchFromApi("/api/v1/gmail/auth-url"),
+
+  sync: (): Promise<SyncResult> =>
+    fetchFromApi("/api/v1/gmail/sync", { method: "POST" }),
+
+  list: (limit = 20, unread_only = false, classification?: string): Promise<{ emails: EmailMessage[]; total: number }> => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (unread_only) params.set("unread_only", "true");
+    if (classification) params.set("classification", classification);
+    return fetchFromApi(`/api/v1/gmail/emails?${params}`);
+  },
+
+  get: (id: string): Promise<EmailMessage> =>
+    fetchFromApi(`/api/v1/gmail/emails/${id}`),
+
+  createDraft: (email_id: string, reply_body: string): Promise<{ status: string; draft_id: string }> =>
+    fetchFromApi("/api/v1/gmail/drafts", {
+      method: "POST",
+      body: JSON.stringify({ email_id, reply_body }),
+    }),
+
+  send: (to: string, subject: string, body: string): Promise<{ status: string; id?: string; mock?: boolean }> =>
+    fetchFromApi("/api/v1/gmail/send", {
+      method: "POST",
+      body: JSON.stringify({ to, subject, body }),
+    }),
+};
+
 export async function sendChatMessage(req: AgentChatRequest): Promise<AgentChatResponse> {
   const data = await fetchFromApi<any>("/api/v1/athena/chat", {
     method: "POST",
