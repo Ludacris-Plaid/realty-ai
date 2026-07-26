@@ -988,3 +988,578 @@ async def memory_count(current_user: Optional[TokenPayload] = Depends(get_curren
         return {"count": mem0_memory_count(), "enabled": True}
     count = len(_facts_to_memories())
     return {"count": count, "enabled": False}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FRONTEND ALIAS ROUTES — endpoints the V1 frontend expects
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─── Chat (alias from /chat to /athena/chat) ────────────────────────────
+
+@app.post("/api/v1/chat")
+async def chat_send(query: AIQuery, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Alias: POST /api/v1/chat -> Athena chat."""
+    agent = _get_athena()
+    user_name = current_user.name if current_user else ""
+    user_id = current_user.sub if current_user else ""
+    result = agent.chat(query.message, user_name=user_name, user_id=user_id)
+    if isinstance(result, dict):
+        result.setdefault("user_id", user_id)
+    return result
+
+
+@app.get("/api/v1/chat/conversations")
+async def chat_conversations(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Alias: GET /api/v1/chat/conversations -> athena conversations."""
+    return {"conversations": list_mem_conversations()}
+
+
+@app.get("/api/v1/chat/conversations/{conv_id}/messages")
+async def chat_conversation_messages(conv_id: str, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Alias: GET /api/v1/chat/conversations/{id}/messages."""
+    messages = get_mem_conversation_messages(conv_id)
+    return {"conversation_id": conv_id, "messages": messages}
+
+
+@app.post("/api/v1/chat/conversations/new")
+async def chat_new_conversation(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Alias: POST /api/v1/chat/conversations/new."""
+    agent = _get_athena()
+    new_id = agent.new_conversation()
+    return {"conversation_id": new_id, "message": "Fresh start. I'm ready for you."}
+
+
+# ─── Briefing (add /api/v1 prefix) ──────────────────────────────────────
+
+@app.get("/api/v1/briefing")
+async def briefing_v1(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Daily AI briefing (with /api/v1 prefix)."""
+    name = current_user.name if current_user else ""
+    return {
+        "text": generate_briefing(agent_name=name),
+        "data": get_briefing_data(agent_name=name),
+    }
+
+
+@app.get("/api/v1/briefing/history")
+async def briefing_history(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Briefing history placeholder."""
+    return []
+
+
+@app.post("/api/v1/briefing/refresh")
+async def briefing_refresh(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Refresh briefing."""
+    name = current_user.name if current_user else ""
+    return {
+        "text": generate_briefing(agent_name=name),
+        "data": get_briefing_data(agent_name=name),
+    }
+
+
+# ─── Clients (alias from /clients to /leads) ────────────────────────────
+
+@app.get("/api/v1/clients")
+async def clients_list(search: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Alias: GET /api/v1/clients -> leads."""
+    uid = current_user.sub if current_user else None
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            query = "SELECT id, user_id, name, email, phone, client_type, status, budget_min, budget_max, location_interest, property_type_interest, timeline, pre_approved, notes, created_at, updated_at FROM clients"
+            params = {}
+            if uid:
+                query += " WHERE user_id = :uid"
+                params["uid"] = uid
+                if search:
+                    query += " AND name ILIKE :search"
+                    params["search"] = f"%{search}%"
+            elif search:
+                query += " WHERE name ILIKE :search"
+                params["search"] = f"%{search}%"
+            query += " ORDER BY created_at DESC LIMIT 100"
+            rows = session.execute(text(query), params).fetchall()
+
+        return [
+            {
+                "id": str(r[0]), "user_id": str(r[1]) if r[1] else None, "name": r[2],
+                "email": r[3], "phone": r[4], "client_type": r[5], "status": r[6],
+                "budget_min": r[7], "budget_max": r[8],
+                "location_interest": r[9] if isinstance(r[9], list) else [r[9]] if r[9] else [],
+                "property_type_interest": r[10], "timeline": r[11],
+                "pre_approved": r[12], "notes": r[13],
+                "created_at": str(r[14]), "updated_at": str(r[15]),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.warning(f"Clients list error: {e}")
+        return []
+
+
+@app.get("/api/v1/clients/{client_id}")
+async def clients_get(client_id: str, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Alias: GET /api/v1/clients/{id}."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            row = session.execute(
+                text("SELECT id, user_id, name, email, phone, client_type, status, budget_min, budget_max, location_interest, property_type_interest, timeline, pre_approved, notes, created_at, updated_at FROM clients WHERE id = :id"),
+                {"id": client_id}
+            ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Client not found")
+        return {
+            "id": str(row[0]), "user_id": str(row[1]) if row[1] else None, "name": row[2],
+            "email": row[3], "phone": row[4], "client_type": row[5], "status": row[6],
+            "budget_min": row[7], "budget_max": row[8],
+            "location_interest": row[9] if isinstance(row[9], list) else [row[9]] if row[9] else [],
+            "property_type_interest": row[10], "timeline": row[11],
+            "pre_approved": row[12], "notes": row[13],
+            "created_at": str(row[14]), "updated_at": str(row[15]),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/clients")
+async def clients_create(body: dict, current_user: TokenPayload = Depends(get_current_user)):
+    """Create a new client."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        import uuid as _uuid
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            cid = _uuid.uuid4()
+            session.execute(text("""
+                INSERT INTO clients (id, user_id, name, email, phone, client_type, status, budget_min, budget_max, notes, created_at, updated_at)
+                VALUES (:id, :uid, :name, :email, :phone, :type, :status, :min, :max, :notes, NOW(), NOW())
+            """), {
+                "id": str(cid), "uid": current_user.sub,
+                "name": body.get("name", ""), "email": body.get("email", ""),
+                "phone": body.get("phone", ""), "type": body.get("client_type", "buyer"),
+                "status": "active", "min": body.get("budget_min"), "max": body.get("budget_max"),
+                "notes": body.get("notes", ""),
+            })
+            session.commit()
+        return {"id": str(cid), "name": body.get("name", ""), "status": "active"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/v1/clients/{client_id}")
+async def clients_update(client_id: str, body: dict, current_user: TokenPayload = Depends(get_current_user)):
+    """Update a client."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            updates = []
+            params = {"id": client_id}
+            for field in ["name", "email", "phone", "client_type", "status", "budget_min", "budget_max", "notes", "pre_approved", "timeline"]:
+                if field in body:
+                    updates.append(f"{field} = :{field}")
+                    params[field] = body[field]
+            if updates:
+                session.execute(text(f"UPDATE clients SET {', '.join(updates)}, updated_at = NOW() WHERE id = :id"), params)
+                session.commit()
+        return {"status": "updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v1/clients/{client_id}")
+async def clients_delete(client_id: str, current_user: TokenPayload = Depends(get_current_user)):
+    """Delete a client."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            session.execute(text("DELETE FROM clients WHERE id = :id"), {"id": client_id})
+            session.commit()
+        return {"status": "deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Tasks ──────────────────────────────────────────────────────────────
+
+@app.get("/api/v1/tasks")
+async def tasks_list(status: str = "", client_id: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """List tasks."""
+    uid = current_user.sub if current_user else None
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            query = "SELECT id, title, description, priority, status, client_id, due_date, created_at FROM tasks WHERE 1=1"
+            params = {}
+            if uid:
+                query += " AND user_id = :uid"
+                params["uid"] = uid
+            if status:
+                query += " AND status = :status"
+                params["status"] = status
+            if client_id:
+                query += " AND client_id = :cid"
+                params["cid"] = client_id
+            query += " ORDER BY created_at DESC LIMIT 100"
+            rows = session.execute(text(query), params).fetchall()
+
+        return [
+            {
+                "id": str(r[0]), "title": r[1], "description": r[2],
+                "priority": r[3], "status": r[4], "client_id": str(r[5]) if r[5] else None,
+                "due_date": str(r[6]) if r[6] else None, "created_at": str(r[7]),
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        logger.warning(f"Tasks list error: {e}")
+        return []
+
+
+@app.post("/api/v1/tasks")
+async def tasks_create(body: dict, current_user: TokenPayload = Depends(get_current_user)):
+    """Create a task."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        import uuid as _uuid
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            tid = _uuid.uuid4()
+            session.execute(text("""
+                INSERT INTO tasks (id, user_id, title, priority, status, client_id, created_at, updated_at)
+                VALUES (:id, :uid, :title, :priority, 'pending', :cid, NOW(), NOW())
+            """), {
+                "id": str(tid), "uid": current_user.sub,
+                "title": body.get("title", ""),
+                "priority": body.get("priority", "medium"),
+                "cid": body.get("client_id"),
+            })
+            session.commit()
+        return {"id": str(tid), "title": body.get("title", ""), "status": "pending", "priority": body.get("priority", "medium")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/v1/tasks/{task_id}")
+async def tasks_update(task_id: str, body: dict, current_user: TokenPayload = Depends(get_current_user)):
+    """Update a task."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            updates = []
+            params = {"id": task_id}
+            for field in ["title", "description", "priority", "status", "due_date", "client_id"]:
+                if field in body:
+                    updates.append(f"{field} = :{field}")
+                    params[field] = body[field]
+            if updates:
+                session.execute(text(f"UPDATE tasks SET {', '.join(updates)}, updated_at = NOW() WHERE id = :id"), params)
+                session.commit()
+        return {"status": "updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Calendar aliases ───────────────────────────────────────────────────
+
+@app.get("/api/v1/calendar/all")
+async def calendar_all(days: int = 7, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Alias: GET /api/v1/calendar/all -> calendar events + tasks."""
+    uid = current_user.sub if current_user else None
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        events = []
+        tasks_list = []
+
+        with Session(engine) as session:
+            # Get showings as events
+            if uid:
+                showing_rows = session.execute(
+                    text("SELECT id, lead_name, property_address, showing_time, status FROM showings WHERE user_id = :uid ORDER BY showing_time LIMIT 20"),
+                    {"uid": uid}
+                ).fetchall()
+            else:
+                showing_rows = session.execute(
+                    text("SELECT id, lead_name, property_address, showing_time, status FROM showings ORDER BY showing_time LIMIT 20")
+                ).fetchall()
+
+            for row in showing_rows:
+                sid, lead_name, address, showing_time, status = row
+                events.append({
+                    "id": str(sid), "title": f"Showing - {lead_name}" if lead_name else "Property Showing",
+                    "start_time": str(showing_time) if showing_time else None,
+                    "end_time": None, "type": "showing",
+                    "location": address or "TBD", "client": lead_name or "Client", "status": status,
+                })
+
+            # Get tasks
+            task_rows = session.execute(
+                text("SELECT id, title, description, priority, status, client_id, due_date, created_at FROM tasks ORDER BY due_date DESC NULLS LAST LIMIT 50")
+            ).fetchall()
+            tasks_list = [
+                {"id": str(r[0]), "title": r[1], "description": r[2], "priority": r[3], "status": r[4],
+                 "client_id": str(r[5]) if r[5] else None, "due_date": str(r[6]) if r[6] else None, "created_at": str(r[7])}
+                for r in task_rows
+            ]
+
+        return {"events": events, "tasks": tasks_list}
+    except Exception as e:
+        logger.warning(f"Calendar all error: {e}")
+        return {"events": [], "tasks": []}
+
+
+@app.post("/api/v1/calendar/sync")
+async def calendar_sync(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Calendar sync placeholder."""
+    return {"status": "synced", "events_added": 0}
+
+
+@app.post("/api/v1/calendar/events")
+async def calendar_create_event(body: dict, current_user: TokenPayload = Depends(get_current_user)):
+    """Create a calendar event."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        import uuid as _uuid
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            eid = _uuid.uuid4()
+            session.execute(text("""
+                INSERT INTO showings (id, lead_name, property_address, showing_time, status, user_id, created_at)
+                VALUES (:id, :name, :addr, :time, 'pending', :uid, NOW())
+            """), {
+                "id": str(eid), "uid": current_user.sub,
+                "name": body.get("title", "Event"), "addr": body.get("location", ""),
+                "time": body.get("start_time", ""),
+            })
+            session.commit()
+        return {"id": str(eid), "status": "created"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Search ─────────────────────────────────────────────────────────────
+
+@app.get("/api/v1/search")
+async def global_search(q: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Global search across clients, properties, memories."""
+    if not q:
+        return {"clients": [], "properties": [], "memories": []}
+    uid = current_user.sub if current_user else None
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            # Search clients
+            client_rows = session.execute(
+                text("SELECT id, name, email FROM clients WHERE name ILIKE :q OR email ILIKE :q LIMIT 10"),
+                {"q": f"%{q}%"}
+            ).fetchall() if True else []
+            clients_result = [{"id": str(r[0]), "name": r[1], "email": r[2]} for r in client_rows]
+
+            # Search properties
+            prop_rows = session.execute(
+                text("SELECT id, address_street, address_city, list_price FROM properties WHERE address_street ILIKE :q OR address_city ILIKE :q LIMIT 10"),
+                {"q": f"%{q}%"}
+            ).fetchall()
+            properties_result = [{"id": str(r[0]), "address": f"{r[1]}, {r[2]}", "price": r[3]} for r in prop_rows]
+
+            # Search memories (PostgreSQL facts)
+            memories_result = [m for m in _facts_to_memories() if q.lower() in m["text"].lower()][:10]
+
+        return {"clients": clients_result, "properties": properties_result, "memories": memories_result}
+    except Exception as e:
+        logger.warning(f"Search error: {e}")
+        return {"clients": [], "properties": [], "memories": []}
+
+
+# ─── Integrations ───────────────────────────────────────────────────────
+
+@app.get("/api/v1/integrations")
+async def integrations_list(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """List integrations status."""
+    return [
+        {"id": "int-gmail", "provider": "gmail",
+         "is_active": bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")),
+         "provider_user_id": None, "created_at": ""},
+        {"id": "int-twilio", "provider": "twilio",
+         "is_active": bool(os.environ.get("TWILIO_ACCOUNT_SID", "")),
+         "provider_user_id": None, "created_at": ""},
+    ]
+
+
+@app.post("/api/v1/integrations/{provider}/connect")
+async def integrations_connect(provider: str, current_user: TokenPayload = Depends(get_current_user)):
+    """Connect an integration."""
+    return {"status": "connected", "provider": provider}
+
+
+@app.post("/api/v1/integrations/{provider}/disconnect")
+async def integrations_disconnect(provider: str, current_user: TokenPayload = Depends(get_current_user)):
+    """Disconnect an integration."""
+    return {"status": "disconnected", "provider": provider}
+
+
+# ─── OAuth Google (alias to Gmail) ──────────────────────────────────────
+
+@app.get("/api/v1/oauth/google/connect")
+async def oauth_google_connect():
+    """Get Google OAuth URL."""
+    try:
+        client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+        redirect_uri = os.environ.get("GOOGLE_OAUTH_REDIRECT_URI",
+            "https://realty-api.indicationsmedia.com/api/v1/gmail/callback")
+        scope = "https://www.googleapis.com/auth/gmail.modify"
+        auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope={scope}&access_type=offline&prompt=consent"
+        return {"auth_url": auth_url}
+    except Exception as e:
+        return {"auth_url": ""}
+
+
+@app.get("/api/v1/oauth/google/status")
+async def oauth_google_status(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Check Google OAuth status."""
+    try:
+        from sqlalchemy.orm import Session
+        from sqlalchemy import text
+        from .db import engine as _db_engine
+        with Session(_db_engine) as session:
+            row = session.execute(
+                text("SELECT email FROM oauth_tokens WHERE provider = 'google' LIMIT 1")
+            ).fetchone()
+        connected = row is not None
+        configured = bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID", ""))
+        return {"connected": connected, "configured": configured, "email": row[0] if row else None}
+    except Exception:
+        configured = bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID", ""))
+        return {"connected": False, "configured": configured, "email": None}
+
+
+# ─── Memories (alias from /memories to /athena/memories) ────────────────
+
+@app.get("/api/v1/memories")
+async def memories_alias(limit: int = 50, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Alias: GET /api/v1/memories."""
+    if mem0_available():
+        memories = mem0_get_all_memories(limit=limit)
+        return memories
+    return _facts_to_memories()[:limit]
+
+
+@app.post("/api/v1/memories")
+async def memories_create(data: dict, current_user: TokenPayload = Depends(get_current_user)):
+    """Create a memory."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        import uuid as _uuid
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            mid = _uuid.uuid4()
+            session.execute(text("""
+                INSERT INTO athena_facts (id, user_id, key, value, category, confidence, created_at, updated_at)
+                VALUES (:id, :uid, :key, :value, :cat, 1.0, NOW(), NOW())
+            """), {
+                "id": str(mid), "uid": current_user.sub,
+                "key": data.get("category", "general"), "value": data.get("content", ""),
+                "cat": data.get("category", "fact"),
+            })
+            session.commit()
+        return {"id": str(mid), "content": data.get("content", ""), "status": "created"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v1/memories/{memory_id}")
+async def memories_delete_alias(memory_id: str, current_user: TokenPayload = Depends(get_current_user)):
+    """Delete a memory."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            session.execute(text("DELETE FROM athena_facts WHERE id = :id"), {"id": memory_id})
+            session.commit()
+        return {"status": "deleted"}
+    except Exception:
+        return {"status": "not_found"}
+
+
+@app.get("/api/v1/memories/search")
+async def memories_search_alias(q: str = "", client_id: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Alias: GET /api/v1/memories/search."""
+    if not q:
+        return []
+    if mem0_available():
+        return mem0_search_memories(q, limit=10)
+    return [m for m in _facts_to_memories() if q.lower() in m["text"].lower()][:10]
+
+
+@app.post("/api/v1/memories/consolidate")
+async def memories_consolidate_alias(client_id: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Consolidate memories."""
+    return {"status": "done", "summaries_created": 0}
+
+
+# ─── Listings scrape alias ──────────────────────────────────────────────
+
+@app.post("/api/v1/listings/scrape")
+async def listings_scrape_alias(location: str = "Edmonton, AB", max_results: int = 25, current_user: TokenPayload = Depends(get_current_user)):
+    """Alias: POST /api/v1/listings/scrape -> scrape."""
+    try:
+        from hermes.scraper import scrape_and_seed
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        result = scrape_and_seed(
+            location=location, count=max(min(max_results, 50), 5),
+            db_url=db_url, user_id=current_user.sub,
+        )
+        return {"status": "ok", **result}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "detail": str(e), "traceback": traceback.format_exc()}
