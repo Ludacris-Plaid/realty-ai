@@ -1031,6 +1031,34 @@ async def chat_new_conversation(current_user: Optional[TokenPayload] = Depends(g
     return {"conversation_id": new_id, "message": "Fresh start. I'm ready for you."}
 
 
+@app.patch("/api/v1/chat/conversations/{conv_id}")
+async def rename_conversation(conv_id: str, body: dict, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Rename a conversation."""
+    from hermes.memory import _engine as _mem_engine
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+    new_title = body.get("title", "").strip()
+    if new_title:
+        with Session(_mem_engine) as s:
+            s.execute(text("UPDATE athena_conv_threads SET title = :title WHERE id = :id"),
+                      {"title": new_title[:200], "id": conv_id})
+            s.commit()
+    return {"status": "renamed", "title": new_title}
+
+
+@app.delete("/api/v1/chat/conversations/{conv_id}")
+async def delete_conversation(conv_id: str, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Delete a conversation and its messages."""
+    from hermes.memory import _engine as _mem_engine
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+    with Session(_mem_engine) as s:
+        s.execute(text("DELETE FROM athena_chat_messages WHERE conversation_id = :id"), {"id": conv_id})
+        s.execute(text("DELETE FROM athena_conv_threads WHERE id = :id"), {"id": conv_id})
+        s.commit()
+    return {"status": "deleted"}
+
+
 # ─── Briefing (add /api/v1 prefix) ──────────────────────────────────────
 
 @app.get("/api/v1/briefing")
@@ -1578,6 +1606,56 @@ async def calendar_create_event(body: dict, current_user: TokenPayload = Depends
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.put("/api/v1/calendar/events/{event_id}")
+async def calendar_update_event(event_id: str, body: dict, current_user: TokenPayload = Depends(get_current_user)):
+    """Update a calendar event."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            updates = []
+            params = {"id": event_id, "uid": current_user.sub}
+            if "title" in body:
+                updates.append("lead_name = :title")
+                params["title"] = body["title"]
+            if "location" in body:
+                updates.append("property_address = :loc")
+                params["loc"] = body["location"]
+            if "start_time" in body:
+                updates.append("showing_time = :stime")
+                params["stime"] = body["start_time"]
+            if "status" in body:
+                updates.append("status = :status")
+                params["status"] = body["status"]
+            if updates:
+                updates.append("updated_at = NOW()")
+                session.execute(text(f"UPDATE showings SET {', '.join(updates)} WHERE id = :id AND user_id = :uid"), params)
+                session.commit()
+        return {"status": "updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v1/calendar/events/{event_id}")
+async def calendar_delete_event(event_id: str, current_user: TokenPayload = Depends(get_current_user)):
+    """Delete a calendar event."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            session.execute(text("DELETE FROM showings WHERE id = :id AND user_id = :uid"), {"id": event_id, "uid": current_user.sub})
+            session.commit()
+        return {"status": "deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ─── Search ─────────────────────────────────────────────────────────────
 
 @app.get("/api/v1/search")
@@ -1830,8 +1908,16 @@ async def memories_consolidate_alias(client_id: str = "", current_user: Optional
 # ─── Listings scrape alias ──────────────────────────────────────────────
 
 @app.post("/api/v1/listings/scrape")
-async def listings_scrape_alias(location: str = "Edmonton, AB", max_results: int = 25, current_user: TokenPayload = Depends(get_current_user)):
-    """Alias: POST /api/v1/listings/scrape -> scrape."""
+async def listings_scrape_alias(
+    location: str = "Edmonton, AB",
+    max_results: int = 25,
+    max_price: int = None,
+    min_beds: int = None,
+    max_beds: int = None,
+    min_baths: int = None,
+    max_baths: int = None,
+    current_user: TokenPayload = Depends(get_current_user),
+):
     try:
         from hermes.scraper import scrape_and_seed
         from .config import settings
@@ -1839,6 +1925,8 @@ async def listings_scrape_alias(location: str = "Edmonton, AB", max_results: int
         result = scrape_and_seed(
             location=location, count=max(min(max_results, 50), 5),
             db_url=db_url, user_id=current_user.sub,
+            max_price=max_price, min_beds=min_beds, max_beds=max_beds,
+            min_baths=min_baths, max_baths=max_baths,
         )
         return {"status": "ok", **result}
     except Exception as e:
