@@ -1616,20 +1616,20 @@ async def memories_create(data: dict, current_user: TokenPayload = Depends(get_c
         db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
         engine = create_engine(db_url)
         with Session(engine) as session:
-                import uuid as _uuid
-                unique_key = f"{data.get('category', 'general')}_{_uuid.uuid4().hex[:8]}"
-                result = session.execute(text("""
-                    INSERT INTO athena_facts (user_id, key, value, category, confidence, created_at, updated_at)
-                    VALUES (:uid, :key, :value, :cat, 1.0, NOW(), NOW())
-                    RETURNING id
-                """), {
-                    "uid": current_user.sub,
-                    "key": unique_key,
-                    "value": data.get("content", ""),
-                    "cat": data.get("category", "fact"),
-                })
-        mid = result.fetchone()[0]
-        session.commit()
+            import uuid as _uuid
+            unique_key = f"{data.get('category', 'general')}_{_uuid.uuid4().hex[:8]}"
+            result = session.execute(text("""
+                INSERT INTO athena_facts (user_id, key, value, category, confidence, created_at, updated_at)
+                VALUES (:uid, :key, :value, :cat, 1.0, NOW(), NOW())
+                RETURNING id
+            """), {
+                "uid": current_user.sub,
+                "key": unique_key,
+                "value": data.get("content", ""),
+                "cat": data.get("category", "fact"),
+            })
+            mid = result.fetchone()[0]
+            session.commit()
         return {"id": mid, "content": data.get("content", ""), "status": "created"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
