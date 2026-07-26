@@ -136,7 +136,7 @@ TOOL_DEFINITIONS = [
     {
         "name": "scrape_properties_advanced",
         "description": "Scrape property listings for a city/area. Works out of the box using Zillow's listing data. Options for advanced sources (Obscura/Browser-Use) are available if installed.",
-        "parameters": {"location": {"type": "string", "description": "City/location to scrape (e.g. 'Edmonton, AB')", "required": True}, "max_results": {"type": "integer", "description": "Maximum listings (default 25)", "required": False}}
+        "parameters": {"location": {"type": "string", "description": "City/location to scrape (e.g. 'Edmonton, AB')", "required": True}, "max_results": {"type": "integer", "description": "Maximum listings (default 25)", "required": False}, "max_price": {"type": "integer", "description": "Maximum price filter (e.g. 400000)", "required": False}}
     },
     {
         "name": "check_scraper_sources",
@@ -255,7 +255,7 @@ def execute_tool(name: str, args: dict) -> str:
     elif name == "search_web":
         return _search_web(args.get("query", ""), args.get("count", 5))
     elif name == "scrape_properties_advanced":
-        return _scrape_properties_advanced(args.get("location", ""), args.get("max_results", 25))
+        return _scrape_properties_advanced(args.get("location", ""), args.get("max_results", 25), args.get("max_price"))
     elif name == "check_scraper_sources":
         return _check_scraper_sources()
     elif name == "scrape_and_import_properties":
@@ -1143,7 +1143,7 @@ def _search_web(query: str, count: int = 5) -> str:
     return output.strip()
 
 
-def _scrape_properties_advanced(location: str, max_results: int = 25) -> str:
+def _scrape_properties_advanced(location: str, max_results: int = 25, max_price: int = None) -> str:
     """Scrape property listings using Zillow scraper directly."""
     if not location:
         location = "Edmonton, AB"
@@ -1153,6 +1153,8 @@ def _scrape_properties_advanced(location: str, max_results: int = 25) -> str:
         from hermes.scraper.zillow import ZillowScraper
         scraper = ZillowScraper(delay=0.5)
         listings = scraper.search(location, max_results)
+        if max_price:
+            listings = [l for l in listings if (l.get("list_price") or 0) <= max_price]
     except Exception as e:
         logger.warning(f"ZillowScraper search failed: {e}")
         return f"Scraping failed: {e}"
