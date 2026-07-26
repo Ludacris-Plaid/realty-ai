@@ -23,13 +23,13 @@ class ZillowScraper:
 
     def search(self, location: str = "Edmonton, AB", max_results: int = 25) -> list[dict]:
         """Search Zillow for real property listings."""
-        listings = self._via_jina_reader(location, max_results)
-        if listings:
-            logger.info(f"Got {len(listings)} listings via Jina Reader")
-            return listings
         listings = self._via_direct_http(location, max_results)
         if listings:
             logger.info(f"Got {len(listings)} listings via direct HTTP")
+            return listings
+        listings = self._via_jina_reader(location, max_results)
+        if listings:
+            logger.info(f"Got {len(listings)} listings via Jina Reader")
         return listings
 
     def _via_jina_reader(self, location: str, max_results: int) -> list[dict]:
@@ -52,17 +52,25 @@ class ZillowScraper:
             return []
 
     def _via_direct_http(self, location: str, max_results: int) -> list[dict]:
-        """Direct HTTP extraction (may be blocked by Zillow)."""
+        """Extract listings from Zillow HTML via embedded JSON data."""
         import httpx
         slug = location.lower().replace(" ", "-").replace(",", "")
-        url = f"https://www.zillow.com/homes/{slug}_rb/"
+        # Use Zillow search API search results page directly
+        encoded = location.replace(" ", "+").replace(",", "%2C")
+        url = f"https://www.zillow.com/homes/{slug}_rb/?searchQueryState=%7B%22pagination%22%3A%7B%7D%7D"
+        api_url = f"https://www.zillow.com/async-create-search-page-state?searchQuery=%7B%22pagination%22%3A%7B%7D%2C%22mapBounds%22%3A%7B%7D%2C%22regionSelection%22%3A%5B%7B%22regionId%22%3A%22{encoded}%22%7D%5D%2C%22filterState%22%3A%7B%22sort%22%3A%7B%22value%22%3A%22days%22%7D%7D%2C%22isMapVisible%22%3Atrue%7D"
         try:
-            client = httpx.Client(follow_redirects=True, timeout=30)
-            resp = client.get(url, headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            })
+            client = httpx.Client(follow_redirects=True, timeout=45,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                         "Accept-Language": "en-US,en;q=0.5",
+                         "Accept-Encoding": "gzip, deflate, br",
+                         "DNT": "1",
+                         "Connection": "keep-alive",
+                         "Upgrade-Insecure-Requests": "1"})
+            resp = client.get(url)
             if resp.status_code != 200:
+                logger.warning(f"Direct HTTP returned {resp.status_code}")
                 return []
             return self._extract_from_html(resp.text, location, max_results)
         except Exception as e:
