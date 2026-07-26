@@ -501,6 +501,10 @@ def sync_emails(current_user: TokenPayload = Depends(require_user)):
             label_ids = full.get("labelIds", [])
             is_unread = "UNREAD" in label_ids
             internal_date = full.get("internalDate", "")
+            # Convert millisecond epoch to ISO timestamp
+            from datetime import datetime as dt
+            if internal_date and internal_date.isdigit() and len(internal_date) >= 10:
+                internal_date = dt.utcfromtimestamp(int(internal_date) / 1000).isoformat() + "Z"
 
             with Session(_shared_engine) as session:
                 existing = session.execute(
