@@ -42,7 +42,11 @@ class TokenResponse(BaseModel):
 class UserCreate(BaseModel):
     email: str = Field(pattern=_EMAIL_RE)
     password: str
-    name: str
+    name: str | None = None
+    full_name: str | None = None
+
+    def get_name(self) -> str:
+        return self.name or self.full_name or "User"
 
 
 class UserLogin(BaseModel):

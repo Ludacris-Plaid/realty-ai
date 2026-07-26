@@ -103,7 +103,7 @@ async def register(body: UserCreate):
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
     
-    user = await create_user(body.email, body.password, body.name)
+    user = await create_user(body.email, body.password, body.get_name())
     if not user:
         raise HTTPException(status_code=500, detail="Failed to create user")
     
