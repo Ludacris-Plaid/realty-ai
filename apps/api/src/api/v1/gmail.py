@@ -95,6 +95,7 @@ def _get_stored_credentials(user_id: str) -> dict | None:
             text("SELECT tokens FROM google_oauth_tokens WHERE user_id = :uid AND provider = 'gmail'"),
             {"uid": user_id},
         ).fetchone()
+    logger.warning(f"_get_stored_credentials: uid={user_id[:8]}... row_found={row is not None}")
     if row:
         try:
             return json.loads(row[0])
