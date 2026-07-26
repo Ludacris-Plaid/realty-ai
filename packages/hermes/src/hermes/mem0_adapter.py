@@ -42,20 +42,13 @@ DEFAULT_USER_ID = "athena-user"
 
 
 def _build_embedder_config():
-    """Build embedder config from env vars.
+    """Build embedder config from env vars, with graceful fallbacks.
     
-    Provider options (MEM0_EMBEDDER_PROVIDER):
-      - huggingface (default): uses local sentence-transformers (all-MiniLM-L6-v2).
-        Fast, free, no API key needed. ~80MB model download on first use.
-      - openai: reads OPENAI_API_KEY + OPENAI_BASE_URL
-      - ollama: uses local Ollama instance
-      - fastembed: lightweight ONNX provider (no torch needed)
-    
-    Falls back to fastembed if available, then huggingface, then openai.
+    Provider priority: fastembed → huggingface → openai (if key available) → openai (dummy, degraded).
+    Never raises — always returns a valid config.
     """
     from mem0.embeddings.configs import EmbedderConfig
     
-    # Probe: check which providers are actually available
     _hf_available = None
     def _huggingface_available():
         nonlocal _hf_available
@@ -78,14 +71,17 @@ def _build_embedder_config():
                 _fe_available = False
         return _fe_available
     
+    _openai_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("DEEPSEEK_API_KEY") or ""
+    
     provider = os.environ.get("MEM0_EMBEDDER_PROVIDER", "").lower()
     
-    # Auto-detect: prefer fastembed (lightweight), then huggingface, then openai
     if not provider:
         if _fastembed_available():
             provider = "fastembed"
         elif _huggingface_available():
             provider = "huggingface"
+        elif _openai_key:
+            provider = "openai"
         else:
             provider = "openai"
     
@@ -105,7 +101,9 @@ def _build_embedder_config():
     elif provider == "openai":
         config["model"] = os.environ.get("MEM0_EMBEDDER_MODEL", "text-embedding-3-small")
         dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "1536"))
-    
+        if _openai_key:
+            config["api_key"] = _openai_key
+
     return EmbedderConfig(provider=provider, config=config), dims
 
 
