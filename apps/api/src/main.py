@@ -1429,7 +1429,7 @@ async def calendar_all(days: int = 7, current_user: Optional[TokenPayload] = Dep
         tasks_list = []
 
         with Session(engine) as session:
-            # Get showings as events
+            # Get showings
             if uid:
                 showing_rows = session.execute(
                     text("SELECT id, lead_name, property_address, showing_time, status FROM showings WHERE user_id = :uid ORDER BY showing_time LIMIT 20"),
@@ -1439,7 +1439,6 @@ async def calendar_all(days: int = 7, current_user: Optional[TokenPayload] = Dep
                 showing_rows = session.execute(
                     text("SELECT id, lead_name, property_address, showing_time, status FROM showings ORDER BY showing_time LIMIT 20")
                 ).fetchall()
-
             for row in showing_rows:
                 sid, lead_name, address, showing_time, status = row
                 events.append({
@@ -1447,6 +1446,20 @@ async def calendar_all(days: int = 7, current_user: Optional[TokenPayload] = Dep
                     "start_time": str(showing_time) if showing_time else None,
                     "end_time": None, "type": "showing",
                     "location": address or "TBD", "client": lead_name or "Client", "status": status,
+                })
+
+            # Get synced Google Calendar events
+            cal_rows = session.execute(
+                text("SELECT id, title, description, location, start_time, end_time, is_all_day, status FROM calendar_events WHERE user_id = :uid ORDER BY start_time LIMIT 50"),
+                {"uid": uid}
+            ).fetchall()
+            for row in cal_rows:
+                events.append({
+                    "id": str(row[0]), "title": row[1],
+                    "start_time": str(row[4]) if row[4] else None,
+                    "end_time": str(row[5]) if row[5] else None,
+                    "type": "calendar", "location": row[3] or "",
+                    "description": row[2] or "", "status": row[7], "is_all_day": row[6],
                 })
 
             # Get tasks
@@ -1466,9 +1479,71 @@ async def calendar_all(days: int = 7, current_user: Optional[TokenPayload] = Dep
 
 
 @app.post("/api/v1/calendar/sync")
-async def calendar_sync(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """Calendar sync placeholder."""
-    return {"status": "synced", "events_added": 0}
+async def calendar_sync(current_user: TokenPayload = Depends(get_current_user)):
+    """Sync Google Calendar events."""
+    try:
+        from api.v1.gmail import _get_stored_credentials, _refresh_token_if_needed
+        creds = _get_stored_credentials(current_user.sub)
+        if not creds:
+            return {"status": "not_connected", "events_added": 0, "message": "Google not connected — connect in Settings"}
+
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+        from datetime import datetime
+        import json, uuid as _uuid
+
+        gcred = Credentials(
+            token=creds["access_token"],
+            refresh_token=creds.get("refresh_token", ""),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=creds["client_id"],
+            client_secret=creds["client_secret"],
+        )
+        service = build("calendar", "v3", credentials=gcred)
+        now = datetime.utcnow().isoformat() + "Z"
+        events_result = service.events().list(
+            calendarId="primary",
+            timeMin=now,
+            maxResults=50,
+            singleEvents=True,
+            orderBy="startTime",
+        ).execute()
+        fetched = events_result.get("items", [])
+
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        count = 0
+        with Session(engine) as session:
+            for ev in fetched:
+                start = ev.get("start", {}).get("dateTime", ev.get("start", {}).get("date", ""))
+                end = ev.get("end", {}).get("dateTime", ev.get("end", {}).get("date", ""))
+                is_all_day = not bool(ev.get("start", {}).get("dateTime"))
+                existing = session.execute(
+                    text("SELECT id FROM calendar_events WHERE user_id = :uid AND google_event_id = :gid"),
+                    {"uid": current_user.sub, "gid": ev["id"]},
+                ).fetchone()
+                if not existing:
+                    session.execute(text("""
+                        INSERT INTO calendar_events (id, user_id, google_event_id, title, description, location, start_time, end_time, is_all_day, status, attendees, created_at, updated_at)
+                        VALUES (:id, :uid, :gid, :title, :desc, :loc, :start, :end, :all_day, :status, :atts, NOW(), NOW())
+                    """), {
+                        "id": str(_uuid.uuid4()), "uid": current_user.sub, "gid": ev["id"],
+                        "title": ev.get("summary", "Untitled"),
+                        "desc": ev.get("description", ""), "loc": ev.get("location", ""),
+                        "start": start, "end": end,
+                        "all_day": is_all_day, "status": ev.get("status", "confirmed"),
+                        "atts": json.dumps(ev.get("attendees", [])),
+                    })
+                    count += 1
+            session.commit()
+        return {"status": "ok", "events_added": count, "total": len(fetched)}
+    except ImportError as e:
+        return {"status": "error", "events_added": 0, "message": f"Calendar library not available: {e}"}
+    except Exception as e:
+        return {"status": "error", "events_added": 0, "message": str(e)}
 
 
 @app.get("/api/v1/calendar/availability")
@@ -1497,7 +1572,7 @@ async def calendar_create_event(body: dict, current_user: TokenPayload = Depends
                 "name": body.get("title", "Event"), "addr": body.get("location", ""),
                 "time": body.get("start_time", ""),
             })
-        session.commit()
+            session.commit()
         return {"id": str(eid), "status": "created"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1577,7 +1652,8 @@ async def oauth_google_connect(current_user: TokenPayload = Depends(get_current_
         client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
         redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI",
             "https://realty-api.indicationsmedia.com/api/v1/gmail/callback")
-        scope = "https://www.googleapis.com/auth/gmail.modify"
+        scope = ("https://www.googleapis.com/auth/gmail.modify "
+                 "https://www.googleapis.com/auth/calendar.events.readonly")
         state_jwt, _ = create_access_token(current_user.sub, current_user.email, current_user.name or "")
         auth_url = (f"https://accounts.google.com/o/oauth2/v2/auth"
                     f"?client_id={client_id}"
