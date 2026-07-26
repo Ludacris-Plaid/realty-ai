@@ -1033,12 +1033,70 @@ async def chat_new_conversation(current_user: Optional[TokenPayload] = Depends(g
 
 @app.get("/api/v1/briefing")
 async def briefing_v1(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """Daily AI briefing (with /api/v1 prefix)."""
-    name = current_user.name if current_user else ""
-    return {
-        "text": generate_briefing(agent_name=name),
-        "data": get_briefing_data(agent_name=name),
-    }
+    """Daily AI briefing - frontend-compatible format."""
+    uid = current_user.sub if current_user else None
+    greeting = f"Good {'morning' if datetime.utcnow().hour < 12 else 'afternoon' if datetime.utcnow().hour < 17 else 'evening'}, {current_user.name if current_user else 'Agent'}!"
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            if uid:
+                total_clients = session.execute(text("SELECT COUNT(*) FROM clients WHERE agent_id = :uid"), {"uid": uid}).scalar() or 0
+                new_clients = session.execute(text("SELECT COUNT(*) FROM clients WHERE agent_id = :uid AND created_at >= NOW() - INTERVAL '7 days'"), {"uid": uid}).scalar() or 0
+                total_leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE agent_id = :uid"), {"uid": uid}).scalar() or 0
+                hot_leads = session.execute(text("SELECT COUNT(*) FROM leads WHERE agent_id = :uid AND ai_score >= 80"), {"uid": uid}).scalar() or 0
+                active_listings = session.execute(text("SELECT COUNT(*) FROM properties WHERE agent_id = :uid AND status = 'active'"), {"uid": uid}).scalar() or 0
+                portfolio = session.execute(text("SELECT COALESCE(SUM(list_price), 0) FROM properties WHERE agent_id = :uid AND status = 'active'"), {"uid": uid}).scalar() or 0
+                pending_tasks = session.execute(text("SELECT COUNT(*) FROM tasks WHERE user_id = :uid AND status = 'pending'"), {"uid": uid}).scalar() or 0
+                high_priority = session.execute(text("SELECT COUNT(*) FROM tasks WHERE user_id = :uid AND priority = 'high' AND status != 'completed'"), {"uid": uid}).scalar() or 0
+                events_today = session.execute(text("SELECT COUNT(*) FROM showings WHERE user_id = :uid AND showing_time::date = CURRENT_DATE"), {"uid": uid}).scalar() or 0
+                new_msgs = session.execute(text("SELECT COUNT(*) FROM synced_emails WHERE user_id = :uid AND created_at >= NOW() - INTERVAL '24 hours'"), {"uid": uid}).scalar() or 0
+            else:
+                total_clients = new_clients = total_leads = hot_leads = active_listings = portfolio = pending_tasks = high_priority = events_today = new_msgs = 0
+
+        summary = {
+            "total_clients": total_clients, "new_clients_last_7d": new_clients,
+            "total_leads": total_leads, "hot_leads": hot_leads,
+            "active_listings": active_listings, "total_portfolio_value": float(portfolio),
+            "pending_tasks": pending_tasks, "high_priority_tasks": high_priority,
+            "events_today": events_today, "new_messages_24h": new_msgs,
+        }
+
+        insights = []
+        if hot_leads > 0: insights.append(f"You have {hot_leads} hot lead(s) with scores over 80 — reach out today to maximize conversion.")
+        if new_clients > 0: insights.append(f"{new_clients} new client(s) added in the last 7 days.")
+        if active_listings == 0: insights.append("No active listings. Consider listing new properties to maintain pipeline momentum.")
+        if pending_tasks > 0: insights.append(f"You have {pending_tasks} pending task(s) — {high_priority} of them are high priority.")
+
+        priorities = []
+        if hot_leads > 0: priorities.append(f"Follow up with {hot_leads} hot lead(s)")
+        if pending_tasks > 0: priorities.append(f"Complete {pending_tasks} pending task(s)")
+        if events_today > 0: priorities.append(f"Attend {events_today} showing(s) today")
+        priorities.append("Review your pipeline and plan next actions")
+
+        full_content = generate_briefing(agent_name=current_user.name if current_user else "")
+
+        return {
+            "greeting": greeting,
+            "summary": summary,
+            "insights": insights,
+            "priorities": priorities,
+            "full_content": full_content,
+            "generated_by": "ai",
+        }
+    except Exception as e:
+        logger.warning(f"Briefing error: {e}")
+        return {
+            "greeting": greeting,
+            "summary": {"total_clients": 0, "new_clients_last_7d": 0, "total_leads": 0, "hot_leads": 0,
+                        "active_listings": 0, "total_portfolio_value": 0, "pending_tasks": 0, "high_priority_tasks": 0,
+                        "events_today": 0, "new_messages_24h": 0},
+            "insights": ["Briefing data unavailable — check database connection."],
+            "priorities": [], "full_content": "", "generated_by": "ai",
+        }
 
 
 @app.get("/api/v1/briefing/history")
@@ -1050,11 +1108,7 @@ async def briefing_history(current_user: Optional[TokenPayload] = Depends(get_cu
 @app.post("/api/v1/briefing/refresh")
 async def briefing_refresh(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Refresh briefing."""
-    name = current_user.name if current_user else ""
-    return {
-        "text": generate_briefing(agent_name=name),
-        "data": get_briefing_data(agent_name=name),
-    }
+    return await briefing_v1(current_user)
 
 
 # ─── Clients (alias from /clients to /leads) ────────────────────────────
