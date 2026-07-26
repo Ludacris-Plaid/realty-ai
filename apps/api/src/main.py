@@ -935,11 +935,11 @@ def _facts_to_memories():
             for f in facts:
                 memories.append({
                     "id": f"pg_{cat}_{f['key']}",
-                    "text": f"[{cat}] {f['key']}: {f['value']}",
-                    "metadata": {"category": cat, "key": f.get("key", ""), "confidence": f.get("confidence", 1.0), "source": "postgres"},
-                    "created_at": "",
-                    "importance": f["confidence"],
-                    "categories": [cat],
+                    "content": f['value'],
+                    "category": cat,
+                    "client_id": None,
+                    "created_at": f.get("created_at", ""),
+                    "updated_at": None,
                 })
     return memories
 
