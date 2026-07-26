@@ -378,7 +378,7 @@ async def oauth_callback(code: str = Query(...), state: str = Query(""), error: 
     })
 
     return RedirectResponse(
-        url="https://realty.indicationsmedia.com/dashboard/integrations?connected=gmail",
+        url="https://realty.indicationsmedia.com/dashboard/settings?connected=gmail",
         status_code=302,
     )
 
