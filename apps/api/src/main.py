@@ -544,7 +544,7 @@ async def update_profile(body: ProfileUpdate, current_user: TokenPayload = Depen
                             text(f"UPDATE agent_profiles SET {', '.join(updates)} WHERE user_id = :uid"),
                             params,
                         )
-            session.commit()
+        session.commit()
 
         return {"status": "saved", "message": "Profile updated successfully"}
     except Exception as e:
@@ -1232,7 +1232,7 @@ async def clients_create(body: dict, current_user: TokenPayload = Depends(get_cu
                 "location_interest": loc_str,
                 "notes": body.get("notes", ""),
             })
-            session.commit()
+        session.commit()
         budget = body.get("budget_min") or body.get("budget")
         return {
             "id": str(cid), "user_id": current_user.sub, "name": name_raw,
@@ -1314,7 +1314,7 @@ async def clients_delete(client_id: str, current_user: TokenPayload = Depends(ge
         engine = create_engine(db_url)
         with Session(engine) as session:
             session.execute(text("DELETE FROM clients WHERE id = :id"), {"id": client_id})
-            session.commit()
+        session.commit()
         return {"status": "deleted"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1381,7 +1381,7 @@ async def tasks_create(body: dict, current_user: TokenPayload = Depends(get_curr
                 "priority": body.get("priority", "medium"),
                 "cid": body.get("client_id"),
             })
-            session.commit()
+        session.commit()
         return {"id": str(tid), "title": body.get("title", ""), "status": "pending", "priority": body.get("priority", "medium")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1489,7 +1489,7 @@ async def calendar_create_event(body: dict, current_user: TokenPayload = Depends
                 "name": body.get("title", "Event"), "addr": body.get("location", ""),
                 "time": body.get("start_time", ""),
             })
-            session.commit()
+        session.commit()
         return {"id": str(eid), "status": "created"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1616,18 +1616,20 @@ async def memories_create(data: dict, current_user: TokenPayload = Depends(get_c
         db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
         engine = create_engine(db_url)
         with Session(engine) as session:
-            result = session.execute(text("""
-                INSERT INTO athena_facts (user_id, key, value, category, confidence, created_at, updated_at)
-                VALUES (:uid, :key, :value, :cat, 1.0, NOW(), NOW())
-                RETURNING id
-            """), {
-                "uid": current_user.sub,
-                "key": data.get("category", "general"),
-                "value": data.get("content", ""),
-                "cat": data.get("category", "fact"),
-            })
-            mid = result.fetchone()[0]
-            session.commit()
+                import uuid as _uuid
+                unique_key = f"{data.get('category', 'general')}_{_uuid.uuid4().hex[:8]}"
+                result = session.execute(text("""
+                    INSERT INTO athena_facts (user_id, key, value, category, confidence, created_at, updated_at)
+                    VALUES (:uid, :key, :value, :cat, 1.0, NOW(), NOW())
+                    RETURNING id
+                """), {
+                    "uid": current_user.sub,
+                    "key": unique_key,
+                    "value": data.get("content", ""),
+                    "cat": data.get("category", "fact"),
+                })
+        mid = result.fetchone()[0]
+        session.commit()
         return {"id": mid, "content": data.get("content", ""), "status": "created"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1644,7 +1646,7 @@ async def memories_delete_alias(memory_id: str, current_user: TokenPayload = Dep
         engine = create_engine(db_url)
         with Session(engine) as session:
             session.execute(text("DELETE FROM athena_facts WHERE id = :id"), {"id": memory_id})
-            session.commit()
+        session.commit()
         return {"status": "deleted"}
     except Exception:
         return {"status": "not_found"}
