@@ -127,7 +127,7 @@ def list_listings(
     with Session(engine) as session:
         rows = session.execute(text(query), params).fetchall()
 
-    return {"listings": [_row_to_dict(r) for r in rows], "total": len(rows)}
+    return [_row_to_dict(r) for r in rows]
 
 
 @router.get("/{listing_id}")
