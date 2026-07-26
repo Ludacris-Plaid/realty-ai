@@ -1557,21 +1557,22 @@ async def memories_create(data: dict, current_user: TokenPayload = Depends(get_c
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        import uuid as _uuid
         db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
         engine = create_engine(db_url)
         with Session(engine) as session:
-            mid = _uuid.uuid4()
-            session.execute(text("""
-                INSERT INTO athena_facts (id, user_id, key, value, category, confidence, created_at, updated_at)
-                VALUES (:id, :uid, :key, :value, :cat, 1.0, NOW(), NOW())
+            result = session.execute(text("""
+                INSERT INTO athena_facts (user_id, key, value, category, confidence, created_at, updated_at)
+                VALUES (:uid, :key, :value, :cat, 1.0, NOW(), NOW())
+                RETURNING id
             """), {
-                "id": str(mid), "uid": current_user.sub,
-                "key": data.get("category", "general"), "value": data.get("content", ""),
+                "uid": current_user.sub,
+                "key": data.get("category", "general"),
+                "value": data.get("content", ""),
                 "cat": data.get("category", "fact"),
             })
+            mid = result.fetchone()[0]
             session.commit()
-        return {"id": str(mid), "content": data.get("content", ""), "status": "created"}
+        return {"id": mid, "content": data.get("content", ""), "status": "created"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
