@@ -1035,7 +1035,9 @@ async def chat_new_conversation(current_user: Optional[TokenPayload] = Depends(g
 async def briefing_v1(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Daily AI briefing - frontend-compatible format."""
     uid = current_user.sub if current_user else None
-    greeting = f"Good {'morning' if datetime.utcnow().hour < 12 else 'afternoon' if datetime.utcnow().hour < 17 else 'evening'}, {current_user.name if current_user else 'Agent'}!"
+    from datetime import datetime
+    hour = datetime.utcnow().hour
+    greeting = f"Good {'morning' if hour < 12 else 'afternoon' if hour < 17 else 'evening'}, {current_user.name if current_user else 'Agent'}!"
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
