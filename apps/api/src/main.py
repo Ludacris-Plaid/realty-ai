@@ -1571,16 +1571,26 @@ async def integrations_disconnect(provider: str, current_user: TokenPayload = De
 # ─── OAuth Google (alias to Gmail) ──────────────────────────────────────
 
 @app.get("/api/v1/oauth/google/connect")
-async def oauth_google_connect():
-    """Get Google OAuth URL."""
+async def oauth_google_connect(current_user: TokenPayload = Depends(get_current_user)):
+    """Get Google OAuth URL with user state for callback identification."""
     try:
         client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
         redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI",
             "https://realty-api.indicationsmedia.com/api/v1/gmail/callback")
         scope = "https://www.googleapis.com/auth/gmail.modify"
-        auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={client_id}&redirect_uri={redirect_uri}&response_type=code&scope={scope}&access_type=offline&prompt=consent"
+        state_jwt, _ = create_access_token(current_user.sub, current_user.email, current_user.name or "")
+        auth_url = (f"https://accounts.google.com/o/oauth2/v2/auth"
+                    f"?client_id={client_id}"
+                    f"&redirect_uri={redirect_uri}"
+                    f"&response_type=code"
+                    f"&scope={scope}"
+                    f"&state={state_jwt}"
+                    f"&access_type=offline"
+                    f"&prompt=consent")
         return {"auth_url": auth_url}
     except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"OAuth connect error: {e}")
         return {"auth_url": ""}
 
 
