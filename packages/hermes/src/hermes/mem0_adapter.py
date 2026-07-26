@@ -103,6 +103,8 @@ def _build_embedder_config():
         dims = int(os.environ.get("MEM0_EMBEDDER_DIMS", "1536"))
         if _openai_key:
             config["api_key"] = _openai_key
+            if not os.environ.get("OPENAI_API_KEY"):
+                config["base_url"] = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
 
     return EmbedderConfig(provider=provider, config=config), dims
 
