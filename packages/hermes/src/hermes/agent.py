@@ -665,7 +665,7 @@ class AthenaAgent:
                 "response": response_text,
                 "model_used": self.model_name,
                 "provider": getattr(self.llm, "last_provider", None),
-                "tool_calls": str(tool_calls_used)[:200] if tool_calls_used else [],
+                "tool_calls": tool_calls_used or [],
                 "conversation_id": self.conversation_id,
             }
             
@@ -675,14 +675,17 @@ class AthenaAgent:
                 "response": f"I encountered an error: {str(e)[:200]}. Let me try a simpler approach.",
                 "model_used": self.model_name,
                 "error": str(e),
+                "tool_calls": [],
             }
-            
+
+
         except Exception as e:
             logger.error(f"Athena chat error: {e}")
             return {
                 "response": f"I encountered an error: {str(e)[:200]}. Let me try a simpler approach.",
                 "model_used": self.model_name,
                 "error": str(e),
+                "tool_calls": [],
             }
     
     def _post_chat_learning(self, user_message: str, response: str, tools: list):

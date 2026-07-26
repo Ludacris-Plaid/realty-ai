@@ -95,6 +95,7 @@ _COLUMNS = """
 """
 
 
+@router.get("")
 @router.get("/")
 def list_listings(
     status: Optional[str] = Query(None),

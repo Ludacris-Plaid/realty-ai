@@ -1059,6 +1059,39 @@ async def briefing_refresh(current_user: Optional[TokenPayload] = Depends(get_cu
 
 # ─── Clients (alias from /clients to /leads) ────────────────────────────
 
+def _parse_location(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else [raw]
+    except (json.JSONDecodeError, TypeError):
+        return [loc.strip() for loc in raw.split(",") if loc.strip()]
+
+
+def _row_to_client(r) -> dict:
+    parts = [r.first_name or "", r.last_name or ""]
+    loc_raw = r.location_interest or None
+    return {
+        "id": str(r.id),
+        "user_id": str(r.agent_id) if r.agent_id else None,
+        "name": " ".join(parts).strip(),
+        "email": r.email or "",
+        "phone": r.phone or "",
+        "client_type": r.type or "buyer",
+        "status": "active",
+        "budget_min": float(r.budget) if r.budget is not None else None,
+        "budget_max": None,
+        "location_interest": _parse_location(loc_raw),
+        "property_type_interest": None,
+        "timeline": None,
+        "pre_approved": False,
+        "notes": r.notes or "",
+        "created_at": str(r.created_at) if r.created_at else None,
+        "updated_at": str(r.updated_at) if r.updated_at else None,
+    }
+
+
 @app.get("/api/v1/clients")
 async def clients_list(search: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Alias: GET /api/v1/clients -> leads."""
@@ -1070,32 +1103,21 @@ async def clients_list(search: str = "", current_user: Optional[TokenPayload] = 
         db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
         engine = create_engine(db_url)
         with Session(engine) as session:
-            query = "SELECT id, user_id, name, email, phone, client_type, status, budget_min, budget_max, location_interest, property_type_interest, timeline, pre_approved, notes, created_at, updated_at FROM clients"
+            query = "SELECT id, agent_id, first_name, last_name, email, phone, type, budget, location_interest, notes, ai_score, ai_score_reason, created_at, updated_at FROM clients"
             params = {}
             if uid:
-                query += " WHERE user_id = :uid"
+                query += " WHERE agent_id = :uid"
                 params["uid"] = uid
                 if search:
-                    query += " AND name ILIKE :search"
+                    query += " AND (first_name ILIKE :search OR last_name ILIKE :search OR email ILIKE :search)"
                     params["search"] = f"%{search}%"
             elif search:
-                query += " WHERE name ILIKE :search"
+                query += " WHERE first_name ILIKE :search OR last_name ILIKE :search OR email ILIKE :search"
                 params["search"] = f"%{search}%"
             query += " ORDER BY created_at DESC LIMIT 100"
             rows = session.execute(text(query), params).fetchall()
 
-        return [
-            {
-                "id": str(r[0]), "user_id": str(r[1]) if r[1] else None, "name": r[2],
-                "email": r[3], "phone": r[4], "client_type": r[5], "status": r[6],
-                "budget_min": r[7], "budget_max": r[8],
-                "location_interest": r[9] if isinstance(r[9], list) else [r[9]] if r[9] else [],
-                "property_type_interest": r[10], "timeline": r[11],
-                "pre_approved": r[12], "notes": r[13],
-                "created_at": str(r[14]), "updated_at": str(r[15]),
-            }
-            for r in rows
-        ]
+        return [_row_to_client(r) for r in rows]
     except Exception as e:
         logger.warning(f"Clients list error: {e}")
         return []
@@ -1112,20 +1134,12 @@ async def clients_get(client_id: str, current_user: Optional[TokenPayload] = Dep
         engine = create_engine(db_url)
         with Session(engine) as session:
             row = session.execute(
-                text("SELECT id, user_id, name, email, phone, client_type, status, budget_min, budget_max, location_interest, property_type_interest, timeline, pre_approved, notes, created_at, updated_at FROM clients WHERE id = :id"),
+                text("SELECT id, agent_id, first_name, last_name, email, phone, type, budget, location_interest, notes, ai_score, ai_score_reason, created_at, updated_at FROM clients WHERE id = :id"),
                 {"id": client_id}
             ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Client not found")
-        return {
-            "id": str(row[0]), "user_id": str(row[1]) if row[1] else None, "name": row[2],
-            "email": row[3], "phone": row[4], "client_type": row[5], "status": row[6],
-            "budget_min": row[7], "budget_max": row[8],
-            "location_interest": row[9] if isinstance(row[9], list) else [row[9]] if row[9] else [],
-            "property_type_interest": row[10], "timeline": row[11],
-            "pre_approved": row[12], "notes": row[13],
-            "created_at": str(row[14]), "updated_at": str(row[15]),
-        }
+        return _row_to_client(row)
     except HTTPException:
         raise
     except Exception as e:
@@ -1144,18 +1158,36 @@ async def clients_create(body: dict, current_user: TokenPayload = Depends(get_cu
         engine = create_engine(db_url)
         with Session(engine) as session:
             cid = _uuid.uuid4()
+            name_raw = body.get("name", "")
+            parts = name_raw.rsplit(" ", 1)
+            first_name = parts[0] if len(parts) > 1 else name_raw
+            last_name = parts[1] if len(parts) > 1 else ""
+            locations = body.get("location_interest")
+            loc_str = json.dumps(locations) if isinstance(locations, list) else locations
             session.execute(text("""
-                INSERT INTO clients (id, user_id, name, email, phone, client_type, status, budget_min, budget_max, notes, created_at, updated_at)
-                VALUES (:id, :uid, :name, :email, :phone, :type, :status, :min, :max, :notes, NOW(), NOW())
+                INSERT INTO clients (id, agent_id, first_name, last_name, email, phone, type, budget, location_interest, notes, created_at, updated_at)
+                VALUES (:id, :agent_id, :first_name, :last_name, :email, :phone, :type, :budget, :location_interest, :notes, NOW(), NOW())
             """), {
-                "id": str(cid), "uid": current_user.sub,
-                "name": body.get("name", ""), "email": body.get("email", ""),
-                "phone": body.get("phone", ""), "type": body.get("client_type", "buyer"),
-                "status": "active", "min": body.get("budget_min"), "max": body.get("budget_max"),
+                "id": str(cid), "agent_id": current_user.sub,
+                "first_name": first_name, "last_name": last_name,
+                "email": body.get("email", ""), "phone": body.get("phone", ""),
+                "type": body.get("client_type", "buyer"),
+                "budget": body.get("budget_min") or body.get("budget"),
+                "location_interest": loc_str,
                 "notes": body.get("notes", ""),
             })
             session.commit()
-        return {"id": str(cid), "name": body.get("name", ""), "status": "active"}
+        budget = body.get("budget_min") or body.get("budget")
+        return {
+            "id": str(cid), "user_id": current_user.sub, "name": name_raw,
+            "email": body.get("email", ""), "phone": body.get("phone", ""),
+            "client_type": body.get("client_type", "buyer"), "status": "active",
+            "budget_min": float(budget) if budget else None, "budget_max": None,
+            "location_interest": body.get("location_interest", []),
+            "property_type_interest": None, "timeline": None,
+            "pre_approved": False, "notes": body.get("notes", ""),
+            "created_at": None, "updated_at": None,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1172,13 +1204,44 @@ async def clients_update(client_id: str, body: dict, current_user: TokenPayload 
         with Session(engine) as session:
             updates = []
             params = {"id": client_id}
-            for field in ["name", "email", "phone", "client_type", "status", "budget_min", "budget_max", "notes", "pre_approved", "timeline"]:
-                if field in body:
-                    updates.append(f"{field} = :{field}")
-                    params[field] = body[field]
+
+            frontend_to_db = {
+                "name": None,
+                "email": "email",
+                "phone": "phone",
+                "client_type": "type",
+                "budget_min": "budget",
+                "notes": "notes",
+                "location_interest": "location_interest",
+            }
+
+            if "name" in body:
+                parts = body["name"].rsplit(" ", 1)
+                updates.append("first_name = :first_name")
+                updates.append("last_name = :last_name")
+                params["first_name"] = parts[0] if len(parts) > 1 else body["name"]
+                params["last_name"] = parts[1] if len(parts) > 1 else ""
+
+            if "budget" in body:
+                updates.append("budget = :budget")
+                params["budget"] = body["budget"]
+
+            for frontend_field, db_col in frontend_to_db.items():
+                if frontend_field in body and frontend_field != "name":
+                    if frontend_field == "location_interest":
+                        loc = body["location_interest"]
+                        params["location_interest"] = json.dumps(loc) if isinstance(loc, list) else loc
+                    elif frontend_field == "budget_min":
+                        params["budget"] = body["budget_min"]
+                    else:
+                        params[db_col] = body[frontend_field]
+                    updates.append(f"{db_col} = :{db_col}")
+
             if updates:
-                session.execute(text(f"UPDATE clients SET {', '.join(updates)}, updated_at = NOW() WHERE id = :id"), params)
+                set_clause = ", ".join(dict.fromkeys(updates))
+                session.execute(text(f"UPDATE clients SET {set_clause}, updated_at = NOW() WHERE id = :id"), params)
                 session.commit()
+
         return {"status": "updated"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
