@@ -22,9 +22,9 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import Session
 
+from ...auth import TokenPayload
 from .db import engine as _shared_engine
-from .deps import get_current_user
-from database.models.user import User
+from .deps import require_user
 from database.models.unified_message import (
     UnifiedConversation, UnifiedMessage, ConversationParticipant,
     MessagePlatform, MessageDirection, MessageStatus
@@ -56,7 +56,7 @@ def list_conversations(
     platform: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
     offset: int = Query(0, ge=0),
-    current_user: User = Depends(get_current_user),
+    current_user: TokenPayload = Depends(require_user),
 ):
     """List all conversations for the current user."""
     db = _get_db()
@@ -95,7 +95,7 @@ def get_conversation(
     conversation_id: str,
     limit: int = Query(100, le=200),
     before: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: TokenPayload = Depends(require_user),
 ):
     """Get a conversation with its messages."""
     db = _get_db()
@@ -171,7 +171,7 @@ def get_messages(
     conversation_id: str,
     limit: int = Query(50, le=100),
     before: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user),
+    current_user: TokenPayload = Depends(require_user),
 ):
     """Get messages for a conversation (paginated)."""
     db = _get_db()
@@ -228,7 +228,7 @@ def get_messages(
 @router.post("/send")
 def send_message(
     body: SendMessageRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: TokenPayload = Depends(require_user),
 ):
     """Send a new message (creates conversation if needed)."""
     db = _get_db()
@@ -278,7 +278,7 @@ def send_message(
                 conversation_id=conversation.id,
                 participant_type="phone" if platform == "sms" else "email",
                 participant_value=current_user.email,
-                participant_name=current_user.full_name,
+                participant_name=current_user.name,
                 is_self=True,
             )
             db.add(self_participant)
@@ -335,7 +335,7 @@ def send_message(
 def reply_to_conversation(
     conversation_id: str,
     body: ReplyRequest,
-    current_user: User = Depends(get_current_user),
+    current_user: TokenPayload = Depends(require_user),
 ):
     """Reply to an existing conversation."""
     db = _get_db()
@@ -417,7 +417,7 @@ def reply_to_conversation(
 @router.post("/conversations/{conversation_id}/read")
 def mark_as_read(
     conversation_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: TokenPayload = Depends(require_user),
 ):
     """Mark all messages in a conversation as read."""
     db = _get_db()
@@ -455,7 +455,7 @@ def mark_as_read(
 
 @router.get("/unread-count")
 def get_unread_count(
-    current_user: User = Depends(get_current_user),
+    current_user: TokenPayload = Depends(require_user),
 ):
     """Get total unread count across all platforms."""
     db = _get_db()
