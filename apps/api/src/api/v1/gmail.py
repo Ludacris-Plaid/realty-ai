@@ -454,7 +454,7 @@ def sync_emails(current_user: TokenPayload = Depends(require_user)):
                         },
                     )
                     count += 1
-            session.commit()
+                session.commit()
         return SyncResponse(
             status="mock",
             synced=count,
@@ -545,7 +545,7 @@ def sync_emails(current_user: TokenPayload = Depends(require_user)):
                         },
                     )
                     synced_count += 1
-            session.commit()
+                session.commit()
         return SyncResponse(
             status="ok",
             synced=synced_count,
