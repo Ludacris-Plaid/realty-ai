@@ -109,14 +109,11 @@ async def register(body: UserCreate):
     
     token, expires_in = create_access_token(user["id"], user["email"], name=user.get("name", ""), brokerage_id=user.get("brokerage_id"))
     return {
-        "user": UserResponse(
-            id=user["id"],
-            email=user["email"],
-            name=user["name"],
-            brokerage_id=user.get("brokerage_id"),
-            created_at=user["created_at"],
-        ),
-        "token": TokenResponse(access_token=token, expires_in=expires_in),
+        "access_token": token,
+        "token_type": "bearer",
+        "user_id": user["id"],
+        "email": user["email"],
+        "full_name": user["name"],
     }
 
 
@@ -132,21 +129,22 @@ async def login(body: UserLogin):
     
     token, expires_in = create_access_token(user["id"], user["email"], name=user.get("name", ""), brokerage_id=user.get("brokerage_id"))
     return {
-        "user": UserResponse(
-            id=user["id"],
-            email=user["email"],
-            name=user["name"],
-            brokerage_id=user.get("brokerage_id"),
-            created_at=user["created_at"],
-        ),
-        "token": TokenResponse(access_token=token, expires_in=expires_in),
+        "access_token": token,
+        "token_type": "bearer",
+        "user_id": user["id"],
+        "email": user["email"],
+        "full_name": user["name"],
     }
 
 
 @app.get("/api/v1/auth/me")
 async def me(current_user = Depends(get_current_user)):
     """Get the current authenticated user's profile."""
-    return current_user
+    return {
+        "id": current_user.sub,
+        "email": current_user.email,
+        "full_name": current_user.name,
+    }
 
 
 # ─── Briefing ────────────────────────────────────────────────────────────────
