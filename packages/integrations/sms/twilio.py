@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 from typing import Any
 
@@ -25,14 +26,18 @@ MOCK_SENT = {
 
 class TwilioSMSClient:
     def __init__(
-        self, account_sid: str | None = None, auth_token: str | None = None
+        self,
+        account_sid: str | None = None,
+        auth_token: str | None = None,
+        from_number: str | None = None,
     ) -> None:
-        self.account_sid = account_sid
-        self.auth_token = auth_token
+        self.account_sid = account_sid or os.getenv("TWILIO_ACCOUNT_SID")
+        self.auth_token = auth_token or os.getenv("TWILIO_AUTH_TOKEN")
+        self.from_number = from_number or os.getenv("TWILIO_PHONE_NUMBER")
         self.client = None
-        if HAS_TWILIO and account_sid and auth_token:
+        if HAS_TWILIO and self.account_sid and self.auth_token:
             try:
-                self.client = Client(account_sid, auth_token)
+                self.client = Client(self.account_sid, self.auth_token)
             except Exception as e:
                 logger.warning("Failed to initialize Twilio client: %s", e)
 
@@ -61,4 +66,6 @@ class TwilioSMSClient:
             return {"status": "error", "error": str(e), "to": to}
 
     def _get_from_number(self) -> str:
+        if self.from_number:
+            return self.from_number
         return "+15551234567"
