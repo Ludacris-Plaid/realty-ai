@@ -67,40 +67,31 @@ class ListingUpdate(BaseModel):
 def _row_to_dict(r):
     return {
         "id": str(r[0]),
-        "address_street": r[1],
-        "address_city": r[2],
-        "address_state": r[3],
-        "address_zip": r[4],
-        "address_unit": r[5],
+        "agent_id": str(r[1]) if r[1] else None,
+        "address_street": r[2],
+        "address_city": r[3],
+        "address_state": r[4],
+        "address_zip": r[5],
         "property_type": r[6],
         "status": r[7],
         "beds": r[8],
         "baths": float(r[9]) if r[9] is not None else None,
         "sqft": r[10],
-        "lot_size": r[11],
-        "year_built": r[12],
-        "garage_spaces": r[13],
-        "list_price": float(r[14]) if r[14] is not None else None,
-        "hoa_dues": float(r[15]) if r[15] is not None else None,
-        "description": r[16] or "",
-        "features": r[17] or [],
-        "images": r[18] or [],
-        "mls_number": r[19] or "",
-        "listed_at": r[20].isoformat() if r[20] else None,
-        "sold_at": r[21].isoformat() if r[21] else None,
-        "sold_price": float(r[22]) if r[22] is not None else None,
-        "client_id": str(r[23]) if r[23] else None,
-        "created_at": r[24].isoformat() if r[24] else None,
-        "updated_at": r[25].isoformat() if r[25] else None,
+        "list_price": float(r[11]) if r[11] is not None else None,
+        "description": r[12] or "",
+        "features": r[13] or [],
+        "images": r[14] or [],
+        "mls_number": r[15] or "",
+        "created_at": r[16].isoformat() if r[16] else None,
+        "updated_at": r[17].isoformat() if r[17] else None,
+        "zillow_url": None,
     }
 
 
 _COLUMNS = """
-    id, address_street, address_city, address_state, address_zip,
-    address_unit, property_type, status, beds, baths, sqft, lot_size,
-    year_built, garage_spaces, list_price, hoa_dues, description,
-    features, images, mls_number, listed_at, sold_at, sold_price,
-    client_id, created_at, updated_at
+    id, agent_id, address_street, address_city, address_state, address_zip,
+    property_type, status, beds, baths, sqft, list_price, description,
+    features, images, mls_number, created_at, updated_at
 """
 
 
@@ -159,50 +150,39 @@ def create_listing(data: ListingCreate, current_user: TokenPayload = Depends(req
     listing_id = str(uuid.uuid4())
     now = datetime.utcnow()
     agent_id = current_user.sub
-    brokerage_id = current_user.brokerage_id or agent_id
 
     with Session(engine) as session:
         session.execute(
             text("""
                 INSERT INTO properties
-                    (id, agent_id, brokerage_id, client_id,
-                     address_street, address_city, address_state, address_zip, address_unit,
-                     property_type, status, beds, baths, sqft, lot_size,
-                     year_built, garage_spaces, list_price, hoa_dues,
-                     description, features, mls_number, listed_at,
+                    (id, agent_id,
+                     address_street, address_city, address_state, address_zip,
+                     property_type, status, beds, baths, sqft, list_price,
+                     description, features, mls_number,
                      created_at, updated_at)
                 VALUES
-                    (:id, :agent_id, :brokerage_id, :client_id,
-                     :street, :city, :state, :zip, :unit,
-                     :prop_type, :status, :beds, :baths, :sqft, :lot_size,
-                     :year_built, :garage, :list_price, :hoa,
-                     :description, :features, :mls, :listed_at,
+                    (:id, :agent_id,
+                     :street, :city, :state, :zip,
+                     :prop_type, :status, :beds, :baths, :sqft, :list_price,
+                     :description, :features, :mls,
                      :created_at, :updated_at)
             """),
             {
                 "id": listing_id,
                 "agent_id": agent_id,
-                "brokerage_id": brokerage_id,
-                "client_id": data.client_id,
                 "street": data.address_street,
                 "city": data.address_city,
                 "state": data.address_state,
                 "zip": data.address_zip,
-                "unit": data.address_unit,
                 "prop_type": data.property_type,
                 "status": data.status,
                 "beds": data.beds,
                 "baths": data.baths,
                 "sqft": data.sqft,
-                "lot_size": data.lot_size,
-                "year_built": data.year_built,
-                "garage": data.garage_spaces,
                 "list_price": data.list_price,
-                "hoa": data.hoa_dues,
                 "description": data.description,
                 "features": data.features or [],
                 "mls": data.mls_number,
-                "listed_at": data.listed_at,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -221,14 +201,11 @@ def update_listing(listing_id: str, data: ListingUpdate, current_user: TokenPayl
     field_map = {
         "address_street": "address_street", "address_city": "address_city",
         "address_state": "address_state", "address_zip": "address_zip",
-        "address_unit": "address_unit", "property_type": "property_type",
+        "property_type": "property_type",
         "status": "status", "beds": "beds", "baths": "baths",
-        "sqft": "sqft", "lot_size": "lot_size", "year_built": "year_built",
-        "garage_spaces": "garage_spaces", "list_price": "list_price",
-        "hoa_dues": "hoa_dues", "description": "description",
+        "sqft": "sqft", "list_price": "list_price",
+        "description": "description",
         "features": "features", "mls_number": "mls_number",
-        "listed_at": "listed_at", "sold_at": "sold_at",
-        "sold_price": "sold_price", "client_id": "client_id",
     }
 
     set_parts = []
