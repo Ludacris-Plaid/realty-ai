@@ -408,6 +408,7 @@ def gmail_status(current_user: TokenPayload = Depends(require_user)):
 def sync_emails(current_user: TokenPayload = Depends(require_user)):
     """Sync latest Gmail inbox messages, then auto-classify them."""
     creds = _get_stored_credentials(current_user.sub)
+    logger.warning(f"SYNC: user_id={current_user.sub} creds_found={creds is not None}")
     if not creds:
         # Return mock sync result when not connected
         _ensure_emails_table()

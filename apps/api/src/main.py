@@ -1603,7 +1603,7 @@ async def oauth_google_status(current_user: Optional[TokenPayload] = Depends(get
         from .db import engine as _db_engine
         with Session(_db_engine) as session:
             row = session.execute(
-                text("SELECT email FROM oauth_tokens WHERE provider = 'google' LIMIT 1")
+                text("SELECT email FROM google_oauth_tokens WHERE provider = 'gmail' LIMIT 1")
             ).fetchone()
         connected = row is not None
         configured = bool(os.environ.get("GOOGLE_CLIENT_ID", ""))
