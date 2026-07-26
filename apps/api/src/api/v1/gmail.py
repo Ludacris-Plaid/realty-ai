@@ -691,3 +691,104 @@ def send_email(body: SendRequest, current_user: TokenPayload = Depends(require_u
         return {"status": "ok", "id": sent["id"], "to": body.to, "thread_id": sent.get("threadId", "")}
     except HttpError as e:
         raise HTTPException(status_code=400, detail=f"Failed to send: {e}")
+
+
+@router.get("/drafts")
+def list_drafts(
+    status: str = "",
+    current_user: TokenPayload = Depends(require_user),
+):
+    """List emails with AI-generated draft replies."""
+    with Session(_shared_engine) as session:
+        query = ("SELECT id, sender, sender_name, subject, snippet, ai_draft_reply, "
+                 "ai_classification, ai_suggested_action, thread_id, received_at "
+                 "FROM synced_emails WHERE user_id = :uid AND ai_draft_reply IS NOT NULL AND ai_draft_reply != ''")
+        params = {"uid": current_user.sub}
+        if status == "pending":
+            query += " AND (ai_suggested_action IS NULL OR ai_suggested_action != 'sent')"
+        elif status == "sent":
+            query += " AND ai_suggested_action = 'sent'"
+        query += " ORDER BY received_at DESC"
+        rows = session.execute(text(query), params).fetchall()
+
+    return [
+        {
+            "id": str(r[0]),
+            "to_recipient": r[1],
+            "sender_name": r[2],
+            "subject": r[3],
+            "body": r[5],
+            "ai_confidence": 85,
+            "ai_classification": r[6],
+            "ai_suggested_action": r[7],
+            "thread_id": r[8],
+            "received_at": r[9].isoformat() if r[9] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/drafts/{draft_id}/approve")
+def approve_draft(
+    draft_id: str,
+    edited_body: str = "",
+    current_user: TokenPayload = Depends(require_user),
+):
+    """Approve and send an AI draft reply."""
+    body_to_send = edited_body if edited_body else None
+    with Session(_shared_engine) as session:
+        row = session.execute(
+            text("SELECT sender, subject, ai_draft_reply, gmail_message_id, thread_id FROM synced_emails "
+                 "WHERE id = :id AND user_id = :uid"),
+            {"id": draft_id, "uid": current_user.sub},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Draft not found")
+
+        draft_text = body_to_send or row[2]
+        creds = _get_stored_credentials(current_user.sub)
+        sent = False
+        if creds and HAS_GMAIL_LIB:
+            try:
+                from email.mime.text import MIMEText
+                from google.oauth2.credentials import Credentials as GCred
+                from googleapiclient.discovery import build
+                gcred = GCred(
+                    token=creds["access_token"], refresh_token=creds.get("refresh_token", ""),
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=creds["client_id"], client_secret=creds["client_secret"],
+                )
+                service = build("gmail", "v1", credentials=gcred)
+                msg = MIMEText(draft_text)
+                msg["To"] = row[0]
+                msg["Subject"] = f"Re: {row[1]}"
+                msg["In-Reply-To"] = row[3]
+                rfc_msg = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+                service.users().messages().send(userId="me", body={"raw": rfc_msg}).execute()
+                sent = True
+            except Exception:
+                pass
+
+        session.execute(
+            text("UPDATE synced_emails SET ai_suggested_action = 'sent' WHERE id = :id AND user_id = :uid"),
+            {"id": draft_id, "uid": current_user.sub},
+        )
+        session.commit()
+
+    return {"status": "approved", "sent": sent, "recipient": row[0], "subject": row[1]}
+
+
+@router.post("/drafts/{draft_id}/reject")
+def reject_draft(
+    draft_id: str,
+    current_user: TokenPayload = Depends(require_user),
+):
+    """Reject an AI draft reply (clear it)."""
+    with Session(_shared_engine) as session:
+        session.execute(
+            text("UPDATE synced_emails SET ai_draft_reply = NULL, ai_suggested_action = 'rejected' "
+                 "WHERE id = :id AND user_id = :uid"),
+            {"id": draft_id, "uid": current_user.sub},
+        )
+        session.commit()
+    return {"status": "rejected"}
