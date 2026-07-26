@@ -64,11 +64,11 @@ def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
                 sql = """
                     INSERT INTO properties (id, agent_id, address_street, address_city, address_state,
                         address_zip, list_price, beds, baths, sqft, property_type, status,
-                        description, features, images,
+                        description, features, images, zillow_url,
                         created_at, updated_at)
                     VALUES (:id, :agent_id, :street, :city, :state, :zip, :price, :beds, :baths,
                         :sqft, :ptype, :status, :desc,
-                        :features, :images, NOW(), NOW())
+                        :features, :images, :zurl, NOW(), NOW())
                     ON CONFLICT (id) DO NOTHING
                 """
                 conn.execute(text(sql), {
@@ -79,6 +79,7 @@ def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
                     "sqft": item["sqft"], "ptype": item["property_type"], "status": item["status"],
                     "desc": item["description"],
                     "features": features_json, "images": images_json,
+                    "zurl": item.get("url", ""),
                 })
                 count += 1
             except Exception as e:

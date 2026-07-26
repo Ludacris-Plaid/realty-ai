@@ -82,16 +82,16 @@ def _row_to_dict(r):
         "features": r[13] or [],
         "images": r[14] or [],
         "mls_number": r[15] or "",
-        "created_at": r[16].isoformat() if r[16] else None,
-        "updated_at": r[17].isoformat() if r[17] else None,
-        "zillow_url": None,
+        "zillow_url": r[16] if len(r) > 16 else None,
+        "created_at": r[17].isoformat() if len(r) > 17 and r[17] else None,
+        "updated_at": r[18].isoformat() if len(r) > 18 and r[18] else None,
     }
 
 
 _COLUMNS = """
     id, agent_id, address_street, address_city, address_state, address_zip,
     property_type, status, beds, baths, sqft, list_price, description,
-    features, images, mls_number, created_at, updated_at
+    features, images, mls_number, zillow_url, created_at, updated_at
 """
 
 
