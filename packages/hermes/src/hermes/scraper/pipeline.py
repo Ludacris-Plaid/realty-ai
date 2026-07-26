@@ -9,8 +9,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def scrape_and_seed(location: str = "Edmonton, AB", count: int = 25, db_url: str = "", user_id: str = "") -> dict:
-    """Scrape real listings and insert into properties table."""
+def scrape_and_seed(location: str = "Edmonton, AB", count: int = 25, db_url: str = "",
+                    user_id: str = "", listings: list[dict] = None) -> dict:
+    """Scrape real listings and insert into properties table.
+
+    If listings are provided (pre-scraped), skip the scrape step.
+    """
     from sqlalchemy import create_engine
 
     if not db_url:
@@ -21,9 +25,10 @@ def scrape_and_seed(location: str = "Edmonton, AB", count: int = 25, db_url: str
 
     engine = create_engine(db_url)
 
-    from .zillow import ZillowScraper
-    scraper = ZillowScraper(delay=0.5)
-    listings = scraper.search(location, max_results=count)
+    if listings is None:
+        from .zillow import ZillowScraper
+        scraper = ZillowScraper(delay=0.5)
+        listings = scraper.search(location, max_results=count)
 
     if not listings:
         logger.warning("No listings retrieved from scraper.")

@@ -5,12 +5,15 @@ These tools give Athena complete control over the RealtyAI system.
 All controllable via natural language through the chat interface.
 """
 import os
+import logging
 from typing import Optional
 from datetime import datetime
 
 from sqlalchemy import text, create_engine
 from sqlalchemy.orm import Session
 import uuid
+
+logger = logging.getLogger(__name__)
 
 # ─── Database access helper ────────────────────────────────────────────────
 # Engine is set by the API on init
@@ -1236,7 +1239,8 @@ def _scrape_and_import(location: str, max_results: int = 25) -> str:
         if not listings:
             return f"No listings found for {location}."
 
-        result = scrape_and_seed(location=location, count=max_results, db_url=db_url, user_id=_current_user_id)
+        result = scrape_and_seed(location=location, count=max_results, db_url=db_url,
+                                 user_id=_current_user_id, listings=listings)
 
         output = f"**Scrape & Import Complete — {location}**\n\n"
         output += f"📊 {len(listings)} properties scraped | 🏠 {result.get('properties_inserted', 0)} inserted\n"
@@ -1257,9 +1261,6 @@ def _scrape_and_import(location: str, max_results: int = 25) -> str:
 
         return output.strip()
 
-    except Exception as e:
-        logger.warning(f"scrape_and_import failed: {e}")
-        return f"Import failed: {e}"
     except Exception as e:
         logger.warning(f"scrape_and_import failed: {e}")
         return f"Import failed: {e}"
