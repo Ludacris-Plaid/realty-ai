@@ -44,7 +44,7 @@ export default function CalendarPage() {
   const today = now.getDate();
 
   useEffect(() => {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com";
     fetch(`${API_BASE}/api/v1/calendar/events`)
       .then((r) => r.json())
       .then((data) => setEvents(data.events || []))

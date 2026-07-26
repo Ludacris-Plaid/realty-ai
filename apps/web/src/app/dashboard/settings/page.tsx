@@ -189,7 +189,7 @@ export default function SettingsPage() {
   const handleSave = async () => {
     setSaved(true);
     const token = localStorage.getItem("athena_token");
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com";
     try {
       await fetch(`${API_BASE}/api/v1/auth/profile`, {
         method: "PUT",

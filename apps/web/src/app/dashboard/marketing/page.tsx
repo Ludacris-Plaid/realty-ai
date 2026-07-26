@@ -27,7 +27,7 @@ export default function MarketingPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com";
     fetch(`${API_BASE}/api/v1/campaigns`)
       .then((r) => r.json())
       .then((data) => setCampaigns(data.campaigns || []))

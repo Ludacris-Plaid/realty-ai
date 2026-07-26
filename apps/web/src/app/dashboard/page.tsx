@@ -124,7 +124,7 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com";
     const token = localStorage.getItem("athena_token");
     fetch(`${API_BASE}/api/v1/dashboard/recommendations`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -242,7 +242,7 @@ function EmailWidget() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+    const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com";
     const token = localStorage.getItem("athena_token");
     fetch(`${API_BASE}/api/v1/gmail/emails?limit=3`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},

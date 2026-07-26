@@ -65,7 +65,7 @@ function DocumentRow({ doc }: { doc: Document }) {
           <Sparkles className="h-4 w-4" />
         </Button>
         <Button variant="ghost" size="sm" onClick={() => {
-          const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+          const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com";
           window.open(`${API_BASE}/api/v1/documents/${doc.id}/download`, '_blank');
         }} title="Download">
           <Download className="h-4 w-4" />
@@ -100,7 +100,7 @@ export default function DocumentsPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-ai-api-production.up.railway.app";
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com";
       const res = await fetch(`${API_BASE}/api/v1/documents/upload`, {
         method: "POST",
         body: formData,
