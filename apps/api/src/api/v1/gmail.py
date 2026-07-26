@@ -321,16 +321,23 @@ async def oauth_callback(code: str = Query(...), state: str = Query(""), error: 
         raise HTTPException(status_code=500, detail="Google OAuth not configured")
 
     import httpx
+    import logging
+    _log = logging.getLogger(__name__)
     token_data = {
-        "code": code,
+        "code": code[:10] + '...',
         "client_id": cfg["client_id"],
         "client_secret": cfg["client_secret"],
         "redirect_uri": cfg["redirect_uri"],
         "grant_type": "authorization_code",
     }
+    # Redact code for log safety
+    _token_data_send = dict(token_data)
+    _token_data_send["code"] = code
+    _log.warning(f"GOOGLE_AUTH: redirect_uri=[{cfg['redirect_uri']}] client_id=[{cfg['client_id'][:30]}...] code_len={len(code)}")
     async with httpx.AsyncClient() as client:
-        resp = await client.post("https://oauth2.googleapis.com/token", data=token_data)
+        resp = await client.post("https://oauth2.googleapis.com/token", data=_token_data_send)
         if resp.status_code != 200:
+            _log.error(f"GOOGLE_AUTH failed: {resp.status_code} {resp.text}")
             raise HTTPException(status_code=400, detail=f"Token exchange failed: {resp.text}")
         tokens = resp.json()
 
