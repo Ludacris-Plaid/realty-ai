@@ -966,7 +966,7 @@ async def search_memories(query: str = "", limit: int = 10, current_user: Option
     # Fallback: keyword filter PostgreSQL facts
     q = query.lower()
     memories = _facts_to_memories()
-    filtered = [m for m in memories if q in m["text"].lower()]
+    filtered = [m for m in memories if q in m["content"].lower()]
     return {"memories": filtered[:limit], "count": len(filtered)}
 
 
@@ -1525,7 +1525,7 @@ async def global_search(q: str = "", current_user: Optional[TokenPayload] = Depe
             properties_result = [{"id": str(r[0]), "address": f"{r[1]}, {r[2]}", "price": r[3]} for r in prop_rows]
 
             # Search memories (PostgreSQL facts)
-            memories_result = [m for m in _facts_to_memories() if q.lower() in m["text"].lower()][:10]
+            memories_result = [m for m in _facts_to_memories() if q.lower() in m["content"].lower()][:10]
 
         return {"clients": clients_result, "properties": properties_result, "memories": memories_result}
     except Exception as e:
@@ -1598,12 +1598,44 @@ async def oauth_google_status(current_user: Optional[TokenPayload] = Depends(get
 # ─── Memories (alias from /memories to /athena/memories) ────────────────
 
 @app.get("/api/v1/memories")
-async def memories_alias(limit: int = 50, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """Alias: GET /api/v1/memories."""
+async def memories_alias(
+    limit: int = 50,
+    client_id: str = "",
+    category: str = "",
+    current_user: Optional[TokenPayload] = Depends(get_current_user_optional),
+):
+    """List memories with optional client_id and category filters."""
     if mem0_available():
         memories = mem0_get_all_memories(limit=limit)
         return memories
-    return _facts_to_memories()[:limit]
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+    from .config import settings
+    db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+    engine = create_engine(db_url)
+    query = "SELECT id, user_id, client_id, category, key, value, created_at FROM athena_facts WHERE 1=1"
+    params = {}
+    if client_id:
+        query += " AND client_id = :cid"
+        params["cid"] = client_id
+    if category:
+        query += " AND category = :cat"
+        params["cat"] = category
+    query += " ORDER BY category, confidence DESC LIMIT :lim"
+    params["lim"] = limit
+    with Session(engine) as session:
+        rows = session.execute(text(query), params).fetchall()
+    return [
+        {
+            "id": f"pg_{r[3]}_{r[4]}",
+            "content": r[5],
+            "category": r[3],
+            "client_id": str(r[2]) if r[2] else None,
+            "created_at": str(r[6]) if r[6] else "",
+            "updated_at": None,
+        }
+        for r in rows
+    ]
 
 
 @app.post("/api/v1/memories")
@@ -1613,24 +1645,25 @@ async def memories_create(data: dict, current_user: TokenPayload = Depends(get_c
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
+        import uuid as _uuid
         db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
         engine = create_engine(db_url)
+        unique_key = f"{data.get('category', 'general')}_{_uuid.uuid4().hex[:8]}"
         with Session(engine) as session:
-            import uuid as _uuid
-            unique_key = f"{data.get('category', 'general')}_{_uuid.uuid4().hex[:8]}"
             result = session.execute(text("""
-                INSERT INTO athena_facts (user_id, key, value, category, confidence, created_at, updated_at)
-                VALUES (:uid, :key, :value, :cat, 1.0, NOW(), NOW())
+                INSERT INTO athena_facts (user_id, client_id, key, value, category, confidence, created_at, updated_at)
+                VALUES (:uid, :cid, :key, :value, :cat, 1.0, NOW(), NOW())
                 RETURNING id
             """), {
                 "uid": current_user.sub,
+                "cid": data.get("client_id"),
                 "key": unique_key,
                 "value": data.get("content", ""),
                 "cat": data.get("category", "fact"),
             })
             mid = result.fetchone()[0]
             session.commit()
-        return {"id": mid, "content": data.get("content", ""), "status": "created"}
+        return {"id": mid, "content": data.get("content", ""), "category": data.get("category", "fact"), "status": "created"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1659,7 +1692,7 @@ async def memories_search_alias(q: str = "", client_id: str = "", current_user: 
         return []
     if mem0_available():
         return mem0_search_memories(q, limit=10)
-    return [m for m in _facts_to_memories() if q.lower() in m["text"].lower()][:10]
+    return [m for m in _facts_to_memories() if q.lower() in m["content"].lower()][:10]
 
 
 @app.post("/api/v1/memories/consolidate")
