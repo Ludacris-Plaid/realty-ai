@@ -97,8 +97,11 @@ def _get_stored_credentials(user_id: str) -> dict | None:
         ).fetchone()
     logger.warning(f"_get_stored_credentials: uid={user_id[:8]}... row_found={row is not None}")
     if row:
+        data = row[0]
+        if isinstance(data, dict):
+            return data
         try:
-            return json.loads(row[0])
+            return json.loads(data)
         except (json.JSONDecodeError, TypeError):
             return None
     return None
