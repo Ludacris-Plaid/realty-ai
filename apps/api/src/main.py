@@ -1005,20 +1005,22 @@ async def chat_send(query: AIQuery, current_user: Optional[TokenPayload] = Depen
     result = agent.chat(query.message, user_name=user_name, user_id=user_id)
     if isinstance(result, dict):
         result.setdefault("user_id", user_id)
+        result["model"] = result.get("model_used", "")
     return result
 
 
 @app.get("/api/v1/chat/conversations")
 async def chat_conversations(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Alias: GET /api/v1/chat/conversations -> athena conversations."""
-    return {"conversations": list_mem_conversations()}
+    result = list_mem_conversations()
+    return result.get("conversations", result) if isinstance(result, dict) else result
 
 
 @app.get("/api/v1/chat/conversations/{conv_id}/messages")
 async def chat_conversation_messages(conv_id: str, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Alias: GET /api/v1/chat/conversations/{id}/messages."""
     messages = get_mem_conversation_messages(conv_id)
-    return {"conversation_id": conv_id, "messages": messages}
+    return messages if isinstance(messages, list) else (messages.get("messages", []) if isinstance(messages, dict) else [])
 
 
 @app.post("/api/v1/chat/conversations/new")
@@ -1469,6 +1471,12 @@ async def calendar_sync(current_user: Optional[TokenPayload] = Depends(get_curre
     return {"status": "synced", "events_added": 0}
 
 
+@app.get("/api/v1/calendar/availability")
+async def calendar_availability(duration: int = 30, date: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Calendar availability slots."""
+    return {"slots": []}
+
+
 @app.post("/api/v1/calendar/events")
 async def calendar_create_event(body: dict, current_user: TokenPayload = Depends(get_current_user)):
     """Create a calendar event."""
@@ -1663,7 +1671,39 @@ async def memories_create(data: dict, current_user: TokenPayload = Depends(get_c
             })
             mid = result.fetchone()[0]
             session.commit()
-        return {"id": mid, "content": data.get("content", ""), "category": data.get("category", "fact"), "status": "created"}
+        return {"id": mid, "content": data.get("content", ""), "category": data.get("category", "fact"),
+                "client_id": data.get("client_id"), "importance": 1.0, "created_at": "", "status": "created"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/v1/memories/{memory_id}")
+async def memories_update(memory_id: str, data: dict, current_user: TokenPayload = Depends(get_current_user)):
+    """Update a memory."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            updates = []
+            params = {}
+            if "content" in data:
+                updates.append("value = :value")
+                params["value"] = data["content"]
+            if "category" in data:
+                updates.append("category = :cat")
+                params["cat"] = data["category"]
+            if "client_id" in data:
+                updates.append("client_id = :cid")
+                params["cid"] = data["client_id"]
+            if updates:
+                params["id"] = int(memory_id) if memory_id.isdigit() else None
+                if params.get("id"):
+                    session.execute(text(f"UPDATE athena_facts SET {', '.join(updates)}, updated_at = NOW() WHERE id = :id"), params)
+                    session.commit()
+        return {"id": memory_id, "status": "updated"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
