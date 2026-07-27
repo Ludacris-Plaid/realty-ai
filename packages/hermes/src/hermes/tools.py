@@ -169,6 +169,134 @@ TOOL_DEFINITIONS = [
         "description": "Generate a broader market trend report: active vs pending vs sold counts, median prices by city, top neighborhoods by listing count.",
         "parameters": {"city": {"type": "string", "description": "City name to analyze (optional, leave empty for all)", "required": False}}
     },
+    # ── Lead Full CRUD ──
+    {
+        "name": "create_lead",
+        "description": "Create a new lead/client in the pipeline. Provide at minimum name.",
+        "parameters": {"first_name": {"type": "string", "description": "First name", "required": True}, "last_name": {"type": "string", "description": "Last name", "required": True}, "email": {"type": "string", "description": "Email address", "required": False}, "phone": {"type": "string", "description": "Phone number", "required": False}, "budget": {"type": "number", "description": "Maximum budget", "required": False}, "location_interest": {"type": "string", "description": "City/area interested in", "required": False}, "notes": {"type": "string", "description": "Notes about the lead", "required": False}}
+    },
+    {
+        "name": "delete_lead",
+        "description": "Permanently delete a lead by ID from the system.",
+        "parameters": {"lead_id": {"type": "string", "description": "UUID of the lead to delete", "required": True}}
+    },
+    # ── Listing Full CRUD ──
+    {
+        "name": "create_listing",
+        "description": "Create a new property listing with address, price, beds, baths, sqft, etc.",
+        "parameters": {"address_street": {"type": "string", "description": "Street address", "required": True}, "address_city": {"type": "string", "description": "City", "required": True}, "address_state": {"type": "string", "description": "State/province code", "required": False}, "address_zip": {"type": "string", "description": "Zip code", "required": False}, "list_price": {"type": "number", "description": "List price", "required": True}, "beds": {"type": "integer", "description": "Bedrooms", "required": False}, "baths": {"type": "number", "description": "Bathrooms", "required": False}, "sqft": {"type": "integer", "description": "Square footage", "required": False}, "property_type": {"type": "string", "description": "single_family, condo, townhouse, etc.", "required": False}, "status": {"type": "string", "description": "ACTIVE, PENDING, SOLD, DRAFT", "required": False}, "description": {"type": "string", "description": "Property description", "required": False}, "mls_number": {"type": "string", "description": "MLS number", "required": False}}
+    },
+    {
+        "name": "update_listing",
+        "description": "Update a property listing's price, status, description, beds, baths, sqft.",
+        "parameters": {"property_id": {"type": "string", "description": "UUID of the property", "required": True}, "list_price": {"type": "number", "description": "Updated price", "required": False}, "status": {"type": "string", "description": "ACTIVE, PENDING, SOLD, DRAFT", "required": False}, "description": {"type": "string", "description": "Updated description", "required": False}, "beds": {"type": "integer", "description": "Bedrooms", "required": False}, "baths": {"type": "number", "description": "Bathrooms", "required": False}, "sqft": {"type": "integer", "description": "Square footage", "required": False}}
+    },
+    {
+        "name": "delete_listing",
+        "description": "Delete a property listing by ID from the system.",
+        "parameters": {"property_id": {"type": "string", "description": "UUID of the property", "required": True}}
+    },
+    # ── Task Full CRUD ──
+    {
+        "name": "list_tasks",
+        "description": "List all tasks, optionally filtered by status or client.",
+        "parameters": {"status": {"type": "string", "description": "Filter: todo, in_progress, done, cancelled", "required": False}, "client_id": {"type": "string", "description": "Filter by client UUID", "required": False}}
+    },
+    {
+        "name": "get_task",
+        "description": "Get full details for a single task by ID.",
+        "parameters": {"task_id": {"type": "string", "description": "UUID of the task", "required": True}}
+    },
+    {
+        "name": "create_task",
+        "description": "Create a new task with title, priority, and optional client/property links.",
+        "parameters": {"title": {"type": "string", "description": "Task title", "required": True}, "priority": {"type": "string", "description": "high, medium, low", "required": False}, "description": {"type": "string", "description": "Task description", "required": False}, "client_id": {"type": "string", "description": "Associated client UUID", "required": False}, "property_id": {"type": "string", "description": "Associated property UUID", "required": False}, "due_date": {"type": "string", "description": "Due date ISO format", "required": False}}
+    },
+    {
+        "name": "update_task",
+        "description": "Update a task's title, status, priority, or due date.",
+        "parameters": {"task_id": {"type": "string", "description": "UUID of the task", "required": True}, "title": {"type": "string", "description": "New title", "required": False}, "status": {"type": "string", "description": "todo, in_progress, done, cancelled", "required": False}, "priority": {"type": "string", "description": "high, medium, low", "required": False}, "due_date": {"type": "string", "description": "Due date ISO format", "required": False}}
+    },
+    {
+        "name": "delete_task",
+        "description": "Delete a task by ID.",
+        "parameters": {"task_id": {"type": "string", "description": "UUID of the task", "required": True}}
+    },
+    # ── Calendar/Event Full CRUD ──
+    {
+        "name": "list_events",
+        "description": "List upcoming showings and calendar events for the next N days.",
+        "parameters": {"days": {"type": "integer", "description": "Days ahead (default 30)", "required": False}}
+    },
+    {
+        "name": "create_event",
+        "description": "Create a showing or calendar event. Provide title, start time, and optional location.",
+        "parameters": {"title": {"type": "string", "description": "Event title", "required": True}, "start_time": {"type": "string", "description": "Start datetime ISO 8601", "required": True}, "end_time": {"type": "string", "description": "End datetime ISO 8601", "required": False}, "location": {"type": "string", "description": "Address/location", "required": False}, "lead_name": {"type": "string", "description": "Client name for showing", "required": False}, "description": {"type": "string", "description": "Notes about the event", "required": False}}
+    },
+    {
+        "name": "update_event",
+        "description": "Update a showing or calendar event's title, time, location, or status.",
+        "parameters": {"event_id": {"type": "string", "description": "UUID of the showing/event", "required": True}, "title": {"type": "string", "description": "New title", "required": False}, "start_time": {"type": "string", "description": "New start time", "required": False}, "end_time": {"type": "string", "description": "New end time", "required": False}, "location": {"type": "string", "description": "New location", "required": False}, "status": {"type": "string", "description": "pending, confirmed, completed, cancelled", "required": False}}
+    },
+    {
+        "name": "delete_event",
+        "description": "Delete/cancel a showing or calendar event by ID.",
+        "parameters": {"event_id": {"type": "string", "description": "UUID of the showing/event", "required": True}}
+    },
+    # ── Email Management ──
+    {
+        "name": "list_emails",
+        "description": "List synced emails from inbox, optionally filtered by classification.",
+        "parameters": {"limit": {"type": "integer", "description": "Max results (default 20)", "required": False}, "classification": {"type": "string", "description": "Filter: buyer_lead, seller_lead, general_question, etc.", "required": False}}
+    },
+    {
+        "name": "get_email",
+        "description": "Get full content of a synced email by ID.",
+        "parameters": {"email_id": {"type": "string", "description": "Email UUID", "required": True}}
+    },
+    {
+        "name": "send_email",
+        "description": "Send an email via connected Gmail account.",
+        "parameters": {"to": {"type": "string", "description": "Recipient email", "required": True}, "subject": {"type": "string", "description": "Email subject", "required": True}, "body": {"type": "string", "description": "Email body text", "required": True}}
+    },
+    {
+        "name": "sync_emails",
+        "description": "Force a sync of new emails from Gmail inbox.",
+        "parameters": {"max_results": {"type": "integer", "description": "Max emails (default 30)", "required": False}}
+    },
+    # ── Briefing ──
+    {
+        "name": "get_briefing",
+        "description": "Get today's daily briefing with business summary, insights, and priorities. Auto-generates if needed.",
+        "parameters": {}
+    },
+    {
+        "name": "refresh_briefing",
+        "description": "Force regenerate today's briefing with fresh data.",
+        "parameters": {}
+    },
+    # ── User Profile ──
+    {
+        "name": "get_user_profile",
+        "description": "Get your user profile: name, email, phone, brokerage, license number.",
+        "parameters": {}
+    },
+    {
+        "name": "update_user_profile",
+        "description": "Update your profile: name, phone, brokerage, license number.",
+        "parameters": {"full_name": {"type": "string", "description": "Full name", "required": False}, "phone": {"type": "string", "description": "Phone number", "required": False}, "brokerage_name": {"type": "string", "description": "Brokerage name", "required": False}, "license_number": {"type": "string", "description": "License number", "required": False}}
+    },
+    # ── Regulatory Law ──
+    {
+        "name": "query_regulations",
+        "description": "Search Canada and US real estate regulations. Covers RECO/REBBA (Ontario), BCFSA/foreign buyer tax (BC), RECA (Alberta), OACIQ (Quebec), RESPA, TILA/TRID, Fair Housing Act, state-specific rules (California, New York, Texas, Florida), commission/antitrust rulings, tax implications, environmental regulations, and more. Returns ranked results with citations.",
+        "parameters": {"query": {"type": "string", "description": "What regulation to look up (e.g. 'foreign buyer tax Ontario', 'RESPA disclosure', 'commission rules', 'Fair Housing')", "required": True}, "country": {"type": "string", "description": "Filter by country: Canada or USA (optional)", "required": False}, "jurisdiction": {"type": "string", "description": "Filter by jurisdiction: Ontario, BC, California, etc. (optional)", "required": False}}
+    },
+    {
+        "name": "list_regulatory_jurisdictions",
+        "description": "List all available regulatory jurisdictions and topics covered. Use this to explore what regulatory information is available before asking a specific question.",
+        "parameters": {"country": {"type": "string", "description": "Filter by country: Canada or USA (optional)", "required": False}}
+    },
 ]
 
 
@@ -268,6 +396,64 @@ def execute_tool(name: str, args: dict) -> str:
         return _property_price_analysis(args.get("property_id", ""))
     elif name == "market_trend_report":
         return _market_trend_report(args.get("city", ""))
+
+    # ── Lead Full CRUD ──
+    elif name == "create_lead":
+        return _create_lead(args)
+    elif name == "delete_lead":
+        return _delete_lead(args.get("lead_id", ""))
+    # ── Listing Full CRUD ──
+    elif name == "create_listing":
+        return _create_listing(args)
+    elif name == "update_listing":
+        return _update_listing(args)
+    elif name == "delete_listing":
+        return _delete_listing(args.get("property_id", ""))
+    # ── Task Full CRUD ──
+    elif name == "list_tasks":
+        return _list_tasks(args.get("status"), args.get("client_id"))
+    elif name == "get_task":
+        return _get_task(args.get("task_id", ""))
+    elif name == "create_task":
+        return _create_task(args)
+    elif name == "update_task":
+        return _update_task(args)
+    elif name == "delete_task":
+        return _delete_task(args.get("task_id", ""))
+    # ── Calendar/Event Full CRUD ──
+    elif name == "list_events":
+        return _list_events(args.get("days", 30))
+    elif name == "create_event":
+        return _create_event(args)
+    elif name == "update_event":
+        return _update_event(args)
+    elif name == "delete_event":
+        return _delete_event(args.get("event_id", ""))
+    # ── Email Management ──
+    elif name == "list_emails":
+        return _list_emails(args.get("limit", 20), args.get("classification"))
+    elif name == "get_email":
+        return _get_email(args.get("email_id", ""))
+    elif name == "send_email":
+        return _send_email(args)
+    elif name == "sync_emails":
+        return _sync_emails(args.get("max_results", 30))
+    # ── Briefing ──
+    elif name == "get_briefing":
+        return _get_briefing()
+    elif name == "refresh_briefing":
+        return _refresh_briefing()
+    # ── User Profile ──
+    elif name == "get_user_profile":
+        return _get_user_profile()
+    elif name == "update_user_profile":
+        return _update_user_profile(args)
+
+    # ── Regulatory Law ──
+    elif name == "query_regulations":
+        return _query_regulations(args.get("query", ""), args.get("country"), args.get("jurisdiction"))
+    elif name == "list_regulatory_jurisdictions":
+        return _list_regulatory_jurisdictions(args.get("country"))
     else:
         return f"Unknown tool: {name}"
 
@@ -1062,6 +1248,423 @@ def _market_trend_report(city: str = "") -> str:
     result += "*Data from your local database. Connect MLS for broader coverage.*"
     return result
 
+
+
+
+# ── Lead Full CRUD Implementations ──
+
+def _create_lead(args: dict) -> str:
+    try:
+        import uuid
+        lead_id = str(uuid.uuid4())
+        uid = _current_user_id
+        first = args.get("first_name", "")
+        last = args.get("last_name", "")
+        email = args.get("email", "")
+        phone = args.get("phone", "")
+        budget = args.get("budget")
+        loc = args.get("location_interest", "")
+        notes = args.get("notes", "")
+        _execute_db(
+            "INSERT INTO leads (id, agent_id, first_name, last_name, email, phone, budget, location_interest, notes, status, created_at, updated_at) VALUES (:id, :uid, :fn, :ln, :em, :ph, :budget, :loc, :notes, 'NEW', NOW(), NOW())",
+            {"id": lead_id, "uid": uid, "fn": first, "ln": last, "em": email, "ph": phone, "budget": budget, "loc": loc, "notes": notes}
+        )
+        return f"Lead created: {first} {last} (ID: {lead_id})"
+    except Exception as e:
+        return f"Error: {e}"
+
+def _delete_lead(lead_id: str) -> str:
+    try:
+        _execute_db("DELETE FROM leads WHERE id = :id", {"id": lead_id})
+        return f"Lead {lead_id} deleted."
+    except Exception as e:
+        return f"Error: {e}"
+
+# ── Listing Full CRUD Implementations ──
+
+def _create_listing(args: dict) -> str:
+    try:
+        import uuid
+        prop_id = str(uuid.uuid4())
+        uid = _current_user_id
+        _execute_db(
+            "INSERT INTO properties (id, agent_id, address_street, address_city, address_state, address_zip, list_price, beds, baths, sqft, property_type, status, description, mls_number, created_at, updated_at) VALUES (:id, :uid, :street, :city, :state, :zip, :price, :beds, :baths, :sqft, :ptype, :status, :desc, :mls, NOW(), NOW())",
+            {
+                "id": prop_id, "uid": uid,
+                "street": args.get("address_street"), "city": args.get("address_city"),
+                "state": args.get("address_state", "AB"), "zip": args.get("address_zip", ""),
+                "price": args.get("list_price"), "beds": args.get("beds"), "baths": args.get("baths"),
+                "sqft": args.get("sqft"), "ptype": args.get("property_type", "single_family"),
+                "status": (args.get("status", "ACTIVE") or "ACTIVE").upper(),
+                "desc": args.get("description", ""), "mls": args.get("mls_number", ""),
+            }
+        )
+        return f"Listing created: {args.get('address_street')}, {args.get('address_city')} - ${args.get('list_price'):,.0f} (ID: {prop_id})"
+    except Exception as e:
+        return f"Error: {e}"
+
+def _update_listing(args: dict) -> str:
+    try:
+        updates = []
+        params = {"id": args.get("property_id")}
+        for field in ["list_price", "status", "description", "beds", "baths", "sqft"]:
+            if field in args and args[field] is not None:
+                # status stored uppercase in VPS DB
+                val = args[field].upper() if field == "status" and isinstance(args[field], str) else args[field]
+                updates.append(f"{field} = :{field}")
+                params[field] = val
+        if updates:
+            _execute_db(f"UPDATE properties SET {', '.join(updates)}, updated_at = NOW() WHERE id = :id", params)
+        return f"Listing {args.get('property_id')} updated."
+    except Exception as e:
+        return f"Error: {e}"
+
+def _delete_listing(property_id: str) -> str:
+    try:
+        _execute_db("DELETE FROM properties WHERE id = :id", {"id": property_id})
+        return f"Listing {property_id} deleted."
+    except Exception as e:
+        return f"Error: {e}"
+
+# ── Task CRUD Implementations ──
+
+def _list_tasks(status: str = None, client_id: str = None) -> str:
+    try:
+        uid = _current_user_id
+        query = "SELECT id, title, priority, status, client_id, due_date, created_at FROM tasks WHERE user_id = :uid"
+        params = {"uid": uid}
+        if status:
+            query += " AND status = :status"
+            params["status"] = status
+        if client_id:
+            query += " AND client_id = :cid"
+            params["cid"] = client_id
+        query += " ORDER BY created_at DESC LIMIT 50"
+        rows = _query_db(query, params)
+        if not rows:
+            return "No tasks found."
+        result = f"**Tasks ({len(rows)}):**\n\n"
+        for r in rows:
+            due = f" due: {r['due_date'].strftime('%b %d')}" if r.get('due_date') else ""
+            result += f"  \u2022 [{r['priority']}] {r['title']} \u2014 {r['status']}{due}\n"
+        return result
+    except Exception as e:
+        return f"Error: {e}"
+
+def _get_task(task_id: str) -> str:
+    try:
+        rows = _query_db("SELECT * FROM tasks WHERE id = :id", {"id": task_id})
+        if not rows:
+            return "Task not found."
+        r = rows[0]
+        due = f"\nDue: {r['due_date'].strftime('%b %d, %Y')}" if r.get('due_date') else ""
+        return f"Task: {r['title']}\nPriority: {r['priority']}\nStatus: {r['status']}\nClient: {r.get('client_id', 'N/A')}{due}\n{r.get('description', '')}"
+    except Exception as e:
+        return f"Error: {e}"
+
+def _create_task(args: dict) -> str:
+    try:
+        import uuid
+        tid = str(uuid.uuid4())
+        uid = _current_user_id
+        _execute_db(
+            "INSERT INTO tasks (id, user_id, title, priority, status, description, client_id, property_id, due_date, created_at, updated_at) VALUES (:id, :uid, :title, :prio, :status, :desc, :cid, :pid, :due, NOW(), NOW())",
+            {
+                "id": tid, "uid": uid, "title": args.get("title", ""),
+                "prio": args.get("priority", "medium"), "status": "todo",
+                "desc": args.get("description", ""), "cid": args.get("client_id"),
+                "pid": args.get("property_id"), "due": args.get("due_date"),
+            }
+        )
+        return f"Task created: '{args.get('title')}' (ID: {tid})"
+    except Exception as e:
+        return f"Error: {e}"
+
+def _update_task(args: dict) -> str:
+    try:
+        updates = []
+        params = {"id": args.get("task_id")}
+        for field in ["title", "status", "priority", "due_date"]:
+            if field in args and args[field] is not None:
+                updates.append(f"{field} = :{field}")
+                params[field] = args[field]
+        if updates:
+            _execute_db(f"UPDATE tasks SET {', '.join(updates)}, updated_at = NOW() WHERE id = :id", params)
+        return f"Task {args.get('task_id')} updated."
+    except Exception as e:
+        return f"Error: {e}"
+
+def _delete_task(task_id: str) -> str:
+    try:
+        _execute_db("DELETE FROM tasks WHERE id = :id", {"id": task_id})
+        return f"Task {task_id} deleted."
+    except Exception as e:
+        return f"Error: {e}"
+
+# ── Calendar/Event CRUD Implementations ──
+
+def _list_events(days: int = 30) -> str:
+    try:
+        uid = _current_user_id
+        from datetime import datetime, timedelta
+        cutoff = datetime.utcnow() + timedelta(days=days)
+        rows = _query_db(
+            "SELECT id, lead_name, property_address, showing_time, status FROM showings WHERE user_id = :uid AND showing_time <= :cutoff ORDER BY showing_time LIMIT 50",
+            {"uid": uid, "cutoff": cutoff}
+        )
+        if not rows:
+            return "No upcoming events found."
+        result = f"**Events ({len(rows)}):**\n\n"
+        for r in rows:
+            t = r['showing_time'].strftime('%b %d %I:%M %p') if r.get('showing_time') else "?"
+            result += f"  \u2022 {r['lead_name']} @ {r['property_address']} \u2014 {t} [{r['status']}]\n"
+        return result
+    except Exception as e:
+        return f"Error: {e}"
+
+def _create_event(args: dict) -> str:
+    try:
+        import uuid
+        eid = str(uuid.uuid4())
+        uid = _current_user_id
+        title = args.get("title", "Event")
+        lead_name = args.get("lead_name", title)
+        loc = args.get("location", "")
+        start = args.get("start_time", "")
+        end = args.get("end_time")
+        desc = args.get("description", "")
+        _execute_db(
+            "INSERT INTO showings (id, user_id, lead_name, property_address, showing_time, status, created_at, updated_at) VALUES (:id, :uid, :name, :addr, :time, 'pending', NOW(), NOW())",
+            {"id": eid, "uid": uid, "name": lead_name, "addr": loc, "time": start}
+        )
+        return f"Event created: '{title}' at {start} (ID: {eid})"
+    except Exception as e:
+        return f"Error: {e}"
+
+def _update_event(args: dict) -> str:
+    try:
+        updates = []
+        params = {"id": args.get("event_id")}
+        field_map = {"title": "lead_name", "location": "property_address", "start_time": "showing_time", "status": "status"}
+        for arg_field, db_field in field_map.items():
+            if arg_field in args and args[arg_field] is not None:
+                updates.append(f"{db_field} = :{db_field}")
+                params[db_field] = args[arg_field]
+        if updates:
+            _execute_db(f"UPDATE showings SET {', '.join(updates)}, updated_at = NOW() WHERE id = :id", params)
+        return f"Event {args.get('event_id')} updated."
+    except Exception as e:
+        return f"Error: {e}"
+
+def _delete_event(event_id: str) -> str:
+    try:
+        _execute_db("DELETE FROM showings WHERE id = :id", {"id": event_id})
+        return f"Event {event_id} deleted."
+    except Exception as e:
+        return f"Error: {e}"
+
+# ── Email CRUD Implementations ──
+
+def _list_emails(limit: int = 20, classification: str = None) -> str:
+    try:
+        uid = _current_user_id
+        query = "SELECT id, subject, sender, sender_name, ai_classification, received_at FROM synced_emails WHERE user_id = :uid"
+        params = {"uid": uid}
+        if classification:
+            query += " AND ai_classification = :cls"
+            params["cls"] = classification
+        query += " ORDER BY received_at DESC NULLS LAST LIMIT :lim"
+        params["lim"] = limit
+        rows = _query_db(query, params)
+        if not rows:
+            return "No emails found. Try sync_emails first."
+        result = f"**Emails ({len(rows)}):**\n\n"
+        for r in rows:
+            name = r.get('sender_name') or r.get('sender', 'Unknown')
+            subj = (r.get('subject') or '(no subject)')[:60]
+            cls = f" [{r.get('ai_classification')}]" if r.get('ai_classification') else ""
+            result += f"  \u2022 {name}: \"{subj}\"{cls}\n"
+        return result
+    except Exception as e:
+        return f"Error: {e}"
+
+def _get_email(email_id: str) -> str:
+    try:
+        rows = _query_db("SELECT * FROM synced_emails WHERE id = :id", {"id": email_id})
+        if not rows:
+            return "Email not found."
+        r = rows[0]
+        t = r['received_at'].strftime('%b %d, %Y %I:%M %p') if r.get('received_at') else "?"
+        body = (r.get('body') or r.get('snippet') or '(no content)')[:2000]
+        return f"From: {r.get('sender_name') or r.get('sender')}\nSubject: {r.get('subject', '(no subject)')}\nDate: {t}\nClassification: {r.get('ai_classification', 'N/A')}\n---\n{body}"
+    except Exception as e:
+        return f"Error: {e}"
+
+def _send_email(args: dict) -> str:
+    to = args.get("to", "")
+    subject = args.get("subject", "")
+    body = args.get("body", "")
+    if not to or not subject or not body:
+        return "Missing required fields: to, subject, body."
+    try:
+        from integrations.gmail.tools import send_gmail
+        uid = _current_user_id
+        result = send_gmail(user_id=uid, to=to, subject=subject, body=body)
+        if result.get("status") == "sent":
+            return f"Email sent to {to} with subject '{subject}'."
+        return f"Send result: {result}"
+    except ImportError:
+        pass
+    except Exception as e:
+        return f"Gmail send failed: {e}"
+    # Fallback: try raw API
+    try:
+        import httpx, json
+        resp = httpx.post(
+            "http://localhost:8000/api/v1/gmail/send",
+            json={"to": to, "subject": subject, "body": body},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return f"Email sent to {to} with subject '{subject}'."
+        return f"Send result: HTTP {resp.status_code}"
+    except Exception as e:
+        return f"Cannot send email: {e}. Connect Gmail in Settings first."
+
+def _sync_emails(max_results: int = 30) -> str:
+    try:
+        from integrations.gmail.tools import sync_gmail
+        uid = _current_user_id
+        result = sync_gmail(user_id=uid, max_results=max_results)
+        count = result.get("synced", 0) if isinstance(result, dict) else 0
+        return f"Synced {count} new emails."
+    except ImportError:
+        pass
+    except Exception as e:
+        pass
+    try:
+        import httpx
+        resp = httpx.post(f"http://localhost:8000/api/v1/gmail/sync?max_results={max_results}", timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            return f"Synced {data.get('synced', 0)} emails."
+        return f"Sync result: HTTP {resp.status_code}"
+    except Exception as e:
+        return f"Cannot sync: {e}. Connect Gmail in Settings."
+
+# ── Briefing Implementations ──
+
+def _get_briefing() -> str:
+    try:
+        import httpx
+        resp = httpx.get("http://localhost:8000/api/v1/briefing", timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            lines = [f"**{data.get('greeting', 'Good morning!')}**"]
+            s = data.get('summary', {})
+            if s:
+                lines.append(f"\n**Business Snapshot:**")
+                lines.append(f"  \u2022 {s.get('total_clients', 0)} clients ({s.get('new_clients_last_7d', 0)} new)")
+                lines.append(f"  \u2022 {s.get('active_listings', 0)} active listings")
+                lines.append(f"  \u2022 {s.get('pending_tasks', 0)} pending tasks ({s.get('high_priority_tasks', 0)} high)")
+                lines.append(f"  \u2022 {s.get('events_today', 0)} events today")
+            for label, key in [("Insights", "insights"), ("Priorities", "priorities")]:
+                items = data.get(key, [])
+                if items:
+                    lines.append(f"\n**{label}:**")
+                    for item in items:
+                        lines.append(f"  \u2022 {item}")
+            return "\n".join(lines)
+        return f"Briefing unavailable (HTTP {resp.status_code})"
+    except Exception as e:
+        return f"Briefing unavailable: {e}"
+
+def _refresh_briefing() -> str:
+    try:
+        import httpx
+        resp = httpx.post("http://localhost:8000/api/v1/briefing/refresh", timeout=15)
+        return f"Briefing refreshed." if resp.status_code == 200 else f"Refresh failed (HTTP {resp.status_code})"
+    except Exception as e:
+        return f"Refresh failed: {e}"
+
+# ── User Profile Implementations ──
+
+def _get_user_profile() -> str:
+    try:
+        uid = _current_user_id
+        rows = _query_db(
+            "SELECT full_name, email, phone, brokerage_name, license_number FROM users WHERE id = :uid",
+            {"uid": uid}
+        )
+        if not rows:
+            return "User not found."
+        r = rows[0]
+        return f"Name: {r.get('full_name', '')}\nEmail: {r.get('email', '')}\nPhone: {r.get('phone', 'N/A')}\nBrokerage: {r.get('brokerage_name', 'N/A')}\nLicense: {r.get('license_number', 'N/A')}"
+    except Exception as e:
+        return f"Error: {e}"
+
+def _update_user_profile(args: dict) -> str:
+    try:
+        updates = []
+        params = {"uid": _current_user_id}
+        for field in ["full_name", "phone", "brokerage_name", "license_number"]:
+            if field in args and args[field] is not None:
+                updates.append(f"{field} = :{field}")
+                params[field] = args[field]
+        if updates:
+            _execute_db(f"UPDATE users SET {', '.join(updates)} WHERE id = :uid", params)
+        return "Profile updated."
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ── Regulatory Law Implementations ──
+
+def _query_regulations(query: str, country: str = None, jurisdiction: str = None) -> str:
+    """Search regulatory knowledge base for Canada/US real estate law."""
+    try:
+        from .regulatory import get_regulatory_service
+        svc = get_regulatory_service()
+        results = svc.query(query, country=country, jurisdiction=jurisdiction, limit=5)
+        if not results:
+            return "No matching regulations found. Try different keywords or check available jurisdictions with list_regulatory_jurisdictions."
+        lines = []
+        for r in results:
+            lines.append(f"**{r['title']}**")
+            lines.append(f"*Jurisdiction:* {r['jurisdiction']} ({r['country']})")
+            lines.append(f"*Citations:* {', '.join(r.get('citations', []))}")
+            lines.append("")
+            lines.append(r['body'])
+            lines.append("---")
+        return "\n".join(lines)
+    except ImportError as e:
+        return f"Regulatory knowledge base not available: {e}"
+    except Exception as e:
+        return f"Error querying regulations: {e}"
+
+def _list_regulatory_jurisdictions(country: str = None) -> str:
+    """List all available regulatory jurisdictions and topics."""
+    try:
+        from .regulatory import get_regulatory_service
+        svc = get_regulatory_service()
+        summary = svc.get_summary(country=country)
+        lines = [f"**Regulatory Knowledge Base**"]
+        lines.append(f"Total regulations: {summary['total_regulations']}")
+        lines.append(f"Countries: {', '.join(summary['countries'])}")
+        lines.append("")
+        lines.append("**Jurisdictions covered:**")
+        for j in summary['jurisdictions']:
+            topics = summary['topics'].get(j, [])
+            lines.append(f"  \u2022 **{j}** \u2014 {len(topics)} topics")
+            for t in topics[:3]:
+                lines.append(f"    - {t}")
+            if len(topics) > 3:
+                lines.append(f"    - ... and {len(topics)-3} more")
+        return "\n".join(lines)
+    except ImportError as e:
+        return f"Regulatory knowledge base not available: {e}"
+    except Exception as e:
+        return f"Error listing jurisdictions: {e}"
 
 # ─── Web Browsing Tool Implementations ─────────────────────────────────────
 

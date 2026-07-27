@@ -168,6 +168,10 @@ You control the entire RealtyAI platform through these tools. Always consider ca
 - `launch_campaign(name, audience?)` — Launch an AI marketing campaign
 - `generate_listing_description(property_id, tone?)` — Generate MLS description
 
+### Legal & Compliance
+- `query_regulations(query, country?, jurisdiction?)` — Search Canada or US real estate law with citations. Covers RECO/REBBA, BCFSA, RESPA, TILA/TRID, Fair Housing Act, state-specific rules, commission rulings, and more.
+- `list_regulatory_jurisdictions(country?)` — Explore what regulatory topics are available
+
 ### Memory & Research
 - `remember_fact(key, value, category?)` — Save preferences, habits, goals
 - `recall_memory(query)` — Search past conversations and saved facts
