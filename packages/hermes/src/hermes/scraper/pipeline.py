@@ -1,66 +1,58 @@
-"""
-Scrape Pipeline — scrape property listings and insert into DB.
-
-Only inserts real scraped properties. No fake lead generation.
-"""
-import uuid
+import json
 import logging
+import uuid
+
+from hermes.scraper.super_scraper import SuperScraper
+from hermes.scraper.zillow import ZillowScraper
 
 logger = logging.getLogger(__name__)
 
 
-def scrape_and_seed(location: str = "Edmonton, AB", count: int = 25, db_url: str = "",
-                    user_id: str = "", listings: list[dict] = None) -> dict:
-    """Scrape real listings and insert into properties table.
+def scrape_and_seed(
+    location: str = "Edmonton, AB",
+    count: int = 25,
+    db_url: str = "",
+    user_id: str = "",
+    max_price: int = None,
+    min_beds: int = None,
+    max_beds: int = None,
+    min_baths: int = None,
+    max_baths: int = None,
+) -> dict:
+    scraper = ZillowScraper(delay=0.5)
+    items = scraper.search(location, count)
 
-    If listings are provided (pre-scraped), skip the scrape step.
-    """
-    from sqlalchemy import create_engine
+    if not items:
+        return {"scraped": 0, "properties_inserted": 0, "location": location}
 
-    if not db_url:
-        import os
-        db_url = os.getenv("DATABASE_URL", "")
-        if "+asyncpg" in db_url:
-            db_url = db_url.replace("+asyncpg", "")
+    # Apply price/bed/bath filters
+    if max_price:
+        items = [i for i in items if (i.get("list_price") or 0) <= max_price]
+    if min_beds:
+        items = [i for i in items if (i.get("beds") or 0) >= min_beds]
+    if max_beds:
+        items = [i for i in items if (i.get("beds") or 0) <= max_beds]
+    if min_baths:
+        items = [i for i in items if (i.get("baths") or 0) >= min_baths]
+    if max_baths:
+        items = [i for i in items if (i.get("baths") or 0) <= max_baths]
+
+    if not db_url or not user_id:
+        return {"scraped": len(items), "properties_inserted": 0, "location": location,
+                "note": "No DB URL or user_id — properties listed but not stored"}
+
+    from sqlalchemy import create_engine, text
 
     engine = create_engine(db_url)
+    aid = user_id
+    inserted = 0
 
-    if listings is None:
-        from .zillow import ZillowScraper
-        scraper = ZillowScraper(delay=0.5)
-        listings = scraper.search(location, max_results=count)
-
-    if not listings:
-        logger.warning("No listings retrieved from scraper.")
-        return {"location": location, "error": "no_listings", "properties_inserted": 0}
-
-    inserted = _insert_properties(engine, listings, user_id)
-
-    return {
-        "location": location,
-        "scraped": len(listings),
-        "properties_inserted": inserted,
-        "source": listings[0].get("source", "unknown") if listings else "none",
-    }
-
-
-def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
-    """Insert scraped properties into the properties table."""
-    import json
-    aid = agent_id or str(uuid.uuid4())
     with engine.connect() as conn:
-        count = 0
-        for item in listings:
+        for item in items:
+            pid = str(uuid.uuid4())
+            features_json = json.dumps(item.get("features", []))
+            images_json = json.dumps(item.get("images", []))
             try:
-                pid = str(uuid.uuid4())
-                features = item.get("features", [])
-                images = item.get("images", [])
-                url = item.get("url", "")
-                source = item.get("source", "scraper")
-                scraped_at = item.get("scraped_at", "")
-                features_json = json.dumps(features)
-                images_json = json.dumps(images)
-
                 sql = """
                     INSERT INTO properties (id, agent_id, address_street, address_city, address_state,
                         address_zip, list_price, beds, baths, sqft, property_type, status,
@@ -81,15 +73,15 @@ def _insert_properties(engine, listings: list[dict], agent_id: str = "") -> int:
                     "features": features_json, "images": images_json,
                     "zurl": item.get("url", ""),
                 })
-                count += 1
+                conn.commit()
+                inserted += 1
             except Exception as e:
-                logger.warning(f"Failed to insert property: {e}")
-                conn.rollback()
-                continue
+                logger.warning(f"Insert failed for {item.get('address_street','?')}: {e}")
 
-        conn.commit()
-        logger.info(f"Inserted {count} properties")
-        return count
-
-
-from sqlalchemy import text  # noqa: E402
+    return {
+        "status": "ok",
+        "location": location,
+        "scraped": len(items),
+        "properties_inserted": inserted,
+        "source": "zillow",
+    }
