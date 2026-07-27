@@ -1932,3 +1932,205 @@ async def listings_scrape_alias(
     except Exception as e:
         import traceback
         return {"status": "error", "detail": str(e), "traceback": traceback.format_exc()}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# UNIFIED INBOX — Slack-style aggregation endpoint
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/v1/messages/unified")
+async def unified_inbox_endpoint(
+    limit: int = 50,
+    platform: str = "",
+    current_user: Optional[TokenPayload] = Depends(get_current_user_optional),
+):
+    """Unified inbox: merge Gmail emails + conversations into Slack-style feed."""
+    uid = current_user.sub if current_user else None
+    if not uid:
+        return []
+
+    results = []
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, "database_url", "").replace("+asyncpg", "")
+        engine = create_engine(db_url)
+
+        with Session(engine) as session:
+            # 1. Gmail emails from synced_emails
+            email_sql = """
+                SELECT id::text, subject, sender, sender_name, snippet, ai_classification, is_unread, received_at
+                FROM synced_emails
+                WHERE user_id = :uid
+                ORDER BY received_at DESC
+            """
+            params = {"uid": uid}
+            if platform and platform == "email":
+                pass  # already filtering to email
+            email_sql += " LIMIT :lim"
+            params["lim"] = limit
+
+            email_rows = session.execute(text(email_sql), params).fetchall()
+            for row in email_rows:
+                results.append({
+                    "id": str(row[0]),
+                    "title": row[1] or "(no subject)",
+                    "platform": "email",
+                    "participants": [row[2] or ""],
+                    "last_message": row[4] or "",
+                    "last_message_at": str(row[7]) if row[7] else "",
+                    "message_count": 1,
+                    "source": "gmail",
+                    "sender_name": row[3] or row[2] or "",
+                    "is_read": not row[6] if row[6] is not None else True,
+                    "ai_classification": row[5],
+                })
+
+            # 2. Showings (calendar events as "events" platform)
+            showings_sql = """
+                SELECT id::text, lead_name, property_address, showing_time, status
+                FROM showings
+                WHERE user_id = :uid AND showing_time >= NOW()
+                ORDER BY showing_time ASC
+                LIMIT :lim
+            """
+            showing_rows = session.execute(text(showings_sql), {"uid": uid, "lim": limit}).fetchall()
+            for row in showing_rows:
+                results.append({
+                    "id": str(row[0]),
+                    "title": f"Showing: {row[1] or 'Client'} @ {row[2] or 'TBD'}",
+                    "platform": "calendar",
+                    "participants": [row[1] or ""],
+                    "last_message": f"Status: {row[4] or 'pending'}",
+                    "last_message_at": str(row[3]) if row[3] else "",
+                    "message_count": 1,
+                    "source": "showing",
+                    "sender_name": row[1] or "",
+                    "is_read": True,
+                })
+
+            # 3. Conversations (Athena chat history)
+            conv_sql = """
+                SELECT c.id::text, c.title, c.updated_at,
+                       (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_msg,
+                       (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) as msg_count
+                FROM conversations c
+                WHERE c.user_id = :uid
+                ORDER BY c.updated_at DESC
+                LIMIT :lim
+            """
+            conv_rows = session.execute(text(conv_sql), {"uid": uid, "lim": limit}).fetchall()
+            for row in conv_rows:
+                results.append({
+                    "id": str(row[0]),
+                    "title": row[1] or "Chat",
+                    "platform": "chat",
+                    "participants": ["Athena"],
+                    "last_message": (str(row[3]) or "")[:120] if row[3] else "",
+                    "last_message_at": str(row[2]) if row[2] else "",
+                    "message_count": row[4] or 0,
+                    "source": "conversation",
+                    "sender_name": "Athena",
+                    "is_read": True,
+                })
+    except Exception as e:
+        logger.warning(f"Unified inbox error: {e}")
+        import traceback
+        logger.warning(traceback.format_exc())
+
+    results.sort(key=lambda x: x.get("last_message_at", ""), reverse=True)
+    return results[:limit]
+
+
+@app.get("/api/v1/messages/unified/{thread_id}")
+async def unified_thread_endpoint(
+    thread_id: str,
+    current_user: Optional[TokenPayload] = Depends(get_current_user_optional),
+):
+    """Get all messages for a unified thread by ID."""
+    uid = current_user.sub if current_user else None
+    if not uid:
+        return []
+
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, "database_url", "").replace("+asyncpg", "")
+        engine = create_engine(db_url)
+
+        with Session(engine) as session:
+            # Try Gmail email first
+            row = session.execute(
+                text("""SELECT id, subject, sender, sender_name, body, snippet, received_at FROM synced_emails WHERE id::text = :tid AND user_id = :uid"""),
+                {"tid": thread_id, "uid": uid}
+            ).fetchone()
+
+            if row:
+                return [{
+                    "id": str(row[0]),
+                    "role": "user",
+                    "content": row[4] or row[5] or "",
+                    "direction": "inbound",
+                    "platform": "email",
+                    "sender": row[2] or "",
+                    "subject": row[1] or "",
+                    "created_at": str(row[6]) if row[6] else "",
+                }]
+
+            # Try conversation (chat messages)
+            msg_rows = session.execute(
+                text("""SELECT m.id::text, m.role, m.content, m.metadata::text, m.created_at FROM messages m WHERE m.conversation_id::text = :tid ORDER BY m.created_at ASC"""),
+                {"tid": thread_id}
+            ).fetchall()
+
+            if msg_rows:
+                return [
+                    {
+                        "id": str(r[0]),
+                        "role": r[1],
+                        "content": r[2],
+                        "direction": "inbound" if r[1] == "user" else "outbound",
+                        "platform": "chat",
+                        "sender": "Athena" if r[1] == "assistant" else "You",
+                        "subject": "",
+                        "created_at": str(r[4]) if r[4] else "",
+                    }
+                    for r in msg_rows
+                ]
+    except Exception as e:
+        logger.warning(f"Unified thread error: {e}")
+
+    return []
+
+
+@app.get("/api/v1/messages/unified/drafts")
+async def unified_drafts_endpoint(
+    current_user: Optional[TokenPayload] = Depends(get_current_user_optional),
+):
+    """List pending email drafts."""
+    uid = current_user.sub if current_user else None
+    if not uid:
+        return []
+
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, "database_url", "").replace("+asyncpg", "")
+        engine = create_engine(db_url)
+
+        with Session(engine) as session:
+            rows = session.execute(
+                text("""SELECT id::text, to_recipient, subject, body, ai_confidence, status, created_at FROM email_drafts WHERE user_id = :uid AND status = 'pending' ORDER BY created_at DESC LIMIT 20"""),
+                {"uid": uid}
+            ).fetchall()
+            return [
+                {"id": r[0], "to": r[1], "subject": r[2], "body": (r[3] or "")[:500],
+                 "confidence": r[4], "status": r[5], "created_at": str(r[6]) if r[6] else ""}
+                for r in rows
+            ]
+    except Exception as e:
+        logger.warning(f"Unified drafts error: {e}")
+    return []
