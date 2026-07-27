@@ -61,6 +61,7 @@ from .auth import (
 
 class AIQuery(BaseModel):
     message: str
+    conversation_id: str | None = None
     override_model: str | None = None
 
 
@@ -1055,6 +1056,12 @@ async def chat_send(query: AIQuery, current_user: Optional[TokenPayload] = Depen
     agent = _get_athena()
     user_name = current_user.name if current_user else ""
     user_id = current_user.sub if current_user else ""
+    # If frontend sends a conversation_id, upload saved messages to agent
+    if query.conversation_id:
+        from hermes.memory import get_conversation_messages as get_mem_conversation_messages
+        past = get_mem_conversation_messages(query.conversation_id, limit=40)
+        if past:
+            agent.conversation_id = query.conversation_id
     result = agent.chat(query.message, user_name=user_name, user_id=user_id)
     if isinstance(result, dict):
         result.setdefault("user_id", user_id)
@@ -1065,7 +1072,9 @@ async def chat_send(query: AIQuery, current_user: Optional[TokenPayload] = Depen
 @app.get("/api/v1/chat/conversations")
 async def chat_conversations(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Alias: GET /api/v1/chat/conversations -> athena conversations."""
-    result = list_mem_conversations()
+    user_id = current_user.sub if current_user else ""
+    from hermes.memory import list_conversations as list_mem_conversations_v2
+    result = list_mem_conversations_v2(user_id=user_id)
     return result.get("conversations", result) if isinstance(result, dict) else result
 
 
