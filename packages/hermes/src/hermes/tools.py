@@ -135,8 +135,8 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "scrape_properties_advanced",
-        "description": "Scrape property listings for a city/area. Works out of the box using Zillow's listing data. Options for advanced sources (Obscura/Browser-Use) are available if installed.",
-        "parameters": {"location": {"type": "string", "description": "City/location to scrape (e.g. 'Edmonton, AB')", "required": True}, "max_results": {"type": "integer", "description": "Maximum listings (default 25)", "required": False}, "max_price": {"type": "integer", "description": "Maximum price filter (e.g. 400000)", "required": False}}
+        "description": "Scrape property listings for a city/area with full filtering: price range, bedrooms, bathrooms, and property type. First choice for any property search.",
+        "parameters": {"location": {"type": "string", "description": "City/location to scrape (e.g. 'Edmonton, AB' or 'Miami, FL')", "required": True}, "max_results": {"type": "integer", "description": "Maximum listings (default 25)", "required": False}, "min_price": {"type": "integer", "description": "Minimum price in dollars", "required": False}, "max_price": {"type": "integer", "description": "Maximum price in dollars (e.g. 1000000 for $1M)", "required": False}, "beds_min": {"type": "integer", "description": "Minimum bedrooms (e.g. 3)", "required": False}, "beds_max": {"type": "integer", "description": "Maximum bedrooms (e.g. 5)", "required": False}, "baths_min": {"type": "integer", "description": "Minimum bathrooms", "required": False}, "baths_max": {"type": "integer", "description": "Maximum bathrooms", "required": False}, "property_type": {"type": "string", "description": "Property type: single_family, condo, townhouse, multi_family, land, commercial", "required": False}, "sort": {"type": "string", "description": "Sort: days (newest), price_low, price_high", "required": False}}
     },
     {
         "name": "check_scraper_sources",
@@ -145,8 +145,19 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "scrape_and_import_properties",
-        "description": "Scrape property listings from Zillow for a city/area and import them into the system as listings. Full end-to-end pipeline. Use this when someone wants to scrape AND save properties.",
-        "parameters": {"location": {"type": "string", "description": "City/location to scrape (e.g. 'Edmonton, AB')", "required": True}, "max_results": {"type": "integer", "description": "Maximum listings to import (default 25)", "required": False}}
+        "description": "Scrape property listings and import them into the system. Full end-to-end pipeline with filters: price range, bedrooms, bathrooms. Use when someone wants to scrape AND save properties to the database.",
+        "parameters": {
+            "location": {"type": "string", "description": "City/location to scrape (e.g. 'Edmonton, AB')", "required": True},
+            "max_results": {"type": "integer", "description": "Maximum listings to import (default 25)", "required": False},
+            "max_price": {"type": "integer", "description": "Maximum price filter (e.g. 1000000)", "required": False},
+            "min_price": {"type": "integer", "description": "Minimum price filter", "required": False},
+            "beds_min": {"type": "integer", "description": "Minimum bedrooms", "required": False},
+            "beds_max": {"type": "integer", "description": "Maximum bedrooms", "required": False},
+            "baths_min": {"type": "integer", "description": "Minimum bathrooms", "required": False},
+            "baths_max": {"type": "integer", "description": "Maximum bathrooms", "required": False},
+            "property_type": {"type": "string", "description": "Property type filter: single_family, condo, townhouse", "required": False}
+        },
+        "required": ["location"]
     },
     # ── Scoring & Analysis Tools ──────────────────────────────────────────
     {
@@ -383,11 +394,32 @@ def execute_tool(name: str, args: dict) -> str:
     elif name == "search_web":
         return _search_web(args.get("query", ""), args.get("count", 5))
     elif name == "scrape_properties_advanced":
-        return _scrape_properties_advanced(args.get("location", ""), args.get("max_results", 25), args.get("max_price"))
+        return _scrape_properties_advanced(
+            args.get("location", ""),
+            max_results=args.get("max_results", 25),
+            min_price=args.get("min_price"),
+            max_price=args.get("max_price"),
+            beds_min=args.get("beds_min"),
+            beds_max=args.get("beds_max"),
+            baths_min=args.get("baths_min"),
+            baths_max=args.get("baths_max"),
+            property_type=args.get("property_type"),
+            sort=args.get("sort"),
+        )
     elif name == "check_scraper_sources":
         return _check_scraper_sources()
     elif name == "scrape_and_import_properties":
-        return _scrape_and_import(args.get("location", ""), args.get("max_results", 25))
+        return _scrape_and_import(
+            args.get("location", ""),
+            max_results=args.get("max_results", 25),
+            min_price=args.get("min_price"),
+            max_price=args.get("max_price"),
+            beds_min=args.get("beds_min"),
+            beds_max=args.get("beds_max"),
+            baths_min=args.get("baths_min"),
+            baths_max=args.get("baths_max"),
+            property_type=args.get("property_type"),
+        )
     elif name == "score_lead":
         return _score_lead(args.get("lead_id", ""))
     elif name == "recommend_follow_up":
@@ -1746,8 +1778,8 @@ def _search_web(query: str, count: int = 5) -> str:
     return output.strip()
 
 
-def _scrape_properties_advanced(location: str, max_results: int = 25, max_price: int = None) -> str:
-    """Scrape property listings using Zillow scraper directly."""
+def _scrape_properties_advanced(location: str, max_results: int = 25, min_price: int = None, max_price: int = None, beds_min: int = None, beds_max: int = None, baths_min: int = None, baths_max: int = None, property_type: str = None, sort: str = None) -> str:
+    """Scrape property listings using Zillow scraper with full filtering."""
     if not location:
         location = "Edmonton, AB"
         logger.info("Scraper called without location; defaulting to Edmonton, AB")
@@ -1755,9 +1787,36 @@ def _scrape_properties_advanced(location: str, max_results: int = 25, max_price:
     try:
         from hermes.scraper.zillow import ZillowScraper
         scraper = ZillowScraper(delay=0.5)
-        listings = scraper.search(location, max_results)
+        listings = scraper.search(location, max_results * 2)  # fetch extra for filtering room
+        if not listings:
+            return f"No listings found for {location}"
+
+        # Apply filters
+        if min_price:
+            listings = [l for l in listings if (l.get("list_price") or 0) >= min_price]
         if max_price:
             listings = [l for l in listings if (l.get("list_price") or 0) <= max_price]
+        if beds_min:
+            listings = [l for l in listings if (l.get("beds") or 0) >= beds_min]
+        if beds_max:
+            listings = [l for l in listings if (l.get("beds") or 0) <= beds_max]
+        if baths_min:
+            listings = [l for l in listings if (l.get("baths") or 0) >= baths_min]
+        if baths_max:
+            listings = [l for l in listings if (l.get("baths") or 0) <= baths_max]
+        if property_type:
+            pt = property_type.lower().replace(" ", "_")
+            listings = [l for l in listings if (l.get("property_type") or "").lower().replace(" ", "_") == pt]
+
+        # Sort
+        if sort == "price_low":
+            listings.sort(key=lambda x: x.get("list_price", 0))
+        elif sort == "price_high":
+            listings.sort(key=lambda x: x.get("list_price", 0), reverse=True)
+        elif sort == "days":
+            listings.sort(key=lambda x: x.get("days_on_zillow", 9999))
+
+        listings = listings[:max_results]
     except Exception as e:
         logger.warning(f"ZillowScraper search failed: {e}")
         return f"Scraping failed: {e}"
@@ -1765,22 +1824,27 @@ def _scrape_properties_advanced(location: str, max_results: int = 25, max_price:
     if not listings:
         return f"No listings found for {location}"
 
-    output = f"**Properties in {location}** ({len(listings)} total)\n"
-    output += "Source: Zillow (Jina Reader)\n\n"
+    filters_used = []
+    if min_price: filters_used.append(f"${min_price:,}+")
+    if max_price: filters_used.append(f"up to ${max_price:,}")
+    if beds_min or beds_max: filters_used.append(f"{beds_min or 0}-{beds_max or '∞'} beds")
+    if baths_min or baths_max: filters_used.append(f"{baths_min or 0}-{baths_max or '∞'} baths")
+    filter_tag = f" ({', '.join(filters_used)})" if filters_used else ""
+
+    output = f"**Properties in {location}{filter_tag}** ({len(listings)} total)\n"
+    output += "Source: Zillow\n\n"
 
     for i, p in enumerate(listings[:10], 1):
         url = p.get("url", "")
-        images = p.get("images", [])
         output += f"{i}. **{p.get('address_street', 'N/A')}**\n"
-        output += f"   ${p.get('list_price', 0):,} | {p.get('beds', 0)}bd | {p.get('baths', 0)}ba | {p.get('sqft', 0)}sqft\n"
-        if images:
-            output += f"   ![{p.get('address_street', 'photo')}]({images[0]})\n"
+        output += f"   ${p.get('list_price', 0):,} | {p.get('beds', 0)}bd | {p.get('baths', 0)}ba | {p.get('sqft', 0)}sqft | {p.get('property_type', 'house')}\n"
         if url:
             output += f"   [View on Zillow]({url})\n"
 
     if len(listings) > 10:
         output += f"\n... and {len(listings) - 10} more properties"
 
+    output += f"\n\n**Filtered:** {filter_tag or 'none'}" if filters_used else ""
     return output.strip()
 
 
@@ -1826,8 +1890,8 @@ def _check_scraper_sources() -> str:
     return output
 
 
-def _scrape_and_import(location: str, max_results: int = 25) -> str:
-    """Scrape properties and import them into the system as listings."""
+def _scrape_and_import(location: str, max_results: int = 25, min_price: int = None, max_price: int = None, beds_min: int = None, beds_max: int = None, baths_min: int = None, baths_max: int = None, property_type: str = None) -> str:
+    """Scrape properties and import them into the system with full filtering."""
     if not location:
         location = "Edmonton, AB"
 
