@@ -1,13 +1,13 @@
 """
 RealtyAI — Model Gateway with 5-Tier Cascading Fallback.
 
-Tier 0 (primary):  OpenCode Zen (free tier, via opencode.ai)
+Tier 0 (primary):  DeepSeek API (free tier, via api.deepseek.com)
 Tier 1:             9router tunnel proxy (ocg/ models via cloudflared)
 Tier 2:             Featherless.ai (paid, fast)
 Tier 3:             NVIDIA API (free last-resort)
 Tier 4:             Groq (free tier, fast) — only used if GROQ_API_KEY set
 
-Free providers in the chain: OpenCode Zen (0), NVIDIA (3), Groq (4).
+Free providers in the chain: DeepSeek API (0), NVIDIA (3), Groq (4).
 Each level falls through ONLY on total failure (timeout, auth, down).
 Rate limits and concurrency caps do NOT trigger fallback — they retry.
 """
@@ -38,8 +38,8 @@ def _env(key: str, default: str = "") -> str:
 
 # Tier configs — populated at call time from env vars
 TIERS = [
-    {  # 0: OpenCode Zen
-        "base": lambda: _env("LLM_API_BASE", "https://opencode.ai/zen/v1"),
+    {  # 0: DeepSeek API
+        "base": lambda: _env("LLM_API_BASE", "https://api.deepseek.com/v1"),
         "key":  lambda: _env("LLM_API_KEY", ""),
         "model": lambda: _env("LLM_DEFAULT_MODEL", "deepseek-v4-flash-free"),
     },

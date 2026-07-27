@@ -101,8 +101,8 @@ class BrowserUseScraper:
         # Run browser-use in a new event loop
         llm = ChatOpenAI(
             model="deepseek-v4-flash-free",
-            base_url="https://opencode.ai/zen/v1",
-            api_key="sk-zen-free",
+            base_url="https://api.deepseek.com/v1",
+            api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
             temperature=0.1,
         )
 

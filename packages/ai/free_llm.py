@@ -8,14 +8,14 @@ struggling upstream.
 
 Guerrilla strategy (see FREETIER.md):
   1. MAX OUT 9router first. It is our self-hosted multi-upstream proxy that
-     aggregates ~80 free models (DeepSeek, NVIDIA, OpenAI-proxied, opencode-go
+     aggregates ~80 free models (DeepSeek, NVIDIA, OpenAI-proxied, ocg
      `ocg/`, Cloudflare `cf/`). We route across its *specific* upstreams with
      per-upstream cooldowns parsed from 9router's own "reset after Xm" errors,
      so we spread load instead of blindly burning `combo_test` slots on dead
      upstreams.
   2. Fall back to the broader free pool (Groq, OpenRouter, NVIDIA, ...) only
      when 9router is cooling.
-  3. opencode-zen + the keyless local 9router proxy are always-available anchors.
+  3. deepseek-free + the keyless local 9router proxy are always-available anchors.
   4. Every keyed provider accepts MULTIPLE keys (comma/newline separated) so one
      config fans out into N independent budget slots — multiplied free quota.
 
@@ -53,28 +53,28 @@ logger = logging.getLogger(__name__)
 # self-healing aggregate (used as a catch-all when specifics are cooling).
 NINEROUTER_UPSTREAMS = [
     "combo_test",                      # self-healing round-robin across all upstreams
-    "ocg/kimi-k2.7-code",              # opencode-go coding specialist
+    "ocg/kimi-k2.7-code",              # ocg coding specialist
     "ds/deepseek-reasoner",            # deepseek reasoning
     "ds/deepseek-chat",                # deepseek chat
     "nvidia/kimi-k2.6",                # NVIDIA kimi
     "nvidia/z-ai/glm-5.2",             # NVIDIA glm
     "openai/gpt-5.4-nano",             # cheap + strong
-    "ocg/qwen3.7-max",                 # opencode-go qwen
+    "ocg/qwen3.7-max",                 # ocg qwen
     "cf/@cf/meta/llama-3.3-70b-instruct-fp8-fast",  # Cloudflare llama
 ]
 
 
 # ─── Free Provider Registry ───────────────────────────────────────────────────
-# Order = priority. opencode-zen is primary (keyless, always available).
+# Order = priority. deepseek-free is primary (keyless, always available).
 # 9router and other providers are fallbacks.
 FREE_PROVIDERS = [
     {
-        "name": "opencode-zen",
-        "base": "https://opencode.ai/zen/v1",
+        "name": "deepseek-free",
+        "base": "https://api.deepseek.com/v1",
         "key_env": "LLM_API_KEY",
         "model": "deepseek-v4-flash-free",
         "keyless": True,
-        "note": "Primary free tier (Novita upstream). No key required.",
+        "note": "Primary free tier (DeepSeek upstream). No key required.",
     },
     {
         "name": "9router",

@@ -4,11 +4,11 @@ RealtyAI — Guerrilla Free-Tier Governor.
 The whole point: keep us coding on a $0 budget.
 
 9router is our unified free-LLM fabric. It exposes ~80 upstreams (DeepSeek,
-NVIDIA, OpenAI-proxied, opencode-go `ocg/`, Cloudflare `cf/`) and round-robins
+NVIDIA, OpenAI-proxied, ocg `ocg/`, Cloudflare `cf/`) and round-robins
 them via `combo_test`. But every upstream has its own quota / balance that
 resets on a timer — when one is exhausted 9router returns an error like:
 
-    [opencode-go/minimax-m3] [429]: ... "Monthly usage limit reached.
+    [ocg/minimax-m3] [429]: ... "Monthly usage limit reached.
     R (reset after 4m 56s)"
 
 Blindly hammering `combo_test` wastes slots on dead upstreams. So this module:
@@ -24,7 +24,7 @@ Blindly hammering `combo_test` wastes slots on dead upstreams. So this module:
 
 Design principle: max out 9router first (spread load across its upstreams with
 quota-aware cooldowns), fall back to the broader free pool (Groq, OpenRouter,
-NVIDIA, ...) only when 9router is cooling, and keep opencode-zen + the keyless
+NVIDIA, ...) only when 9router is cooling, and keep deepseek-free + the keyless
 local 9router proxy as always-available anchors.
 """
 from __future__ import annotations
@@ -48,7 +48,7 @@ FREE_TIER_BUDGETS: dict[str, dict] = {
     # The unified fabric. We WANT to burn this — it's our own proxy.
     "9router":        {"daily_requests": 200_000, "daily_tokens": 200_000_000, "note": "Self-hosted multi-upstream proxy. Spend freely."},
     # Keyless anchors.
-    "opencode-zen":   {"daily_requests": 30_000,  "daily_tokens": 15_000_000,  "note": "Keyless free tier (Novita upstream). Always available."},
+    "deepseek-free":   {"daily_requests": 30_000,  "daily_tokens": 15_000_000,  "note": "Keyless free tier (DeepSeek upstream). Always available."},
     # Keyed free tiers — capped so we stay under their daily walls.
     "nvidia":         {"daily_requests": 5_000,   "daily_tokens": 5_000_000,   "note": "NVIDIA free inference."},
     "groq":           {"daily_requests": 7_000,   "daily_tokens": 4_000_000,   "note": "Groq free tier (tokens/day soft cap)."},

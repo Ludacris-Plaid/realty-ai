@@ -12,4 +12,4 @@ api_router.include_router(listings_router, prefix="/listings", tags=["listings"]
 api_router.include_router(documents_router, prefix="/documents", tags=["documents"])
 api_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(gmail_router, prefix="/gmail", tags=["gmail"])
-# api_router.include_router(messages_router, prefix="/messages", tags=["messages"])
+# api_router.include_router(messages_router, prefix=/messages, tags=[messages])  # ORM not available

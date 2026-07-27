@@ -277,6 +277,21 @@ TOOL_DEFINITIONS = [
     },
     # ── Briefing ──
     {
+        "name": "list_email_drafts",
+        "description": "List all AI-generated email drafts that are pending approval.",
+        "parameters": {}
+    },
+    {
+        "name": "approve_email_draft",
+        "description": "Approve and send an AI-generated email draft.",
+        "parameters": {"draft_id": {"type": "string", "description": "UUID of the draft to approve", "required": True}}
+    },
+    {
+        "name": "delete_email_draft",
+        "description": "Reject or delete an AI-generated email draft.",
+        "parameters": {"draft_id": {"type": "string", "description": "UUID of the draft to delete", "required": True}}
+    },
+    {
         "name": "get_briefing",
         "description": "Get today's daily briefing with business summary, insights, and priorities. Auto-generates if needed.",
         "parameters": {}
@@ -468,6 +483,12 @@ def execute_tool(name: str, args: dict) -> str:
         return _get_email(args.get("email_id", ""))
     elif name == "send_email":
         return _send_email(args)
+    elif name == "list_email_drafts":
+        return _list_email_drafts()
+    elif name == "approve_email_draft":
+        return _approve_email_draft(args.get("draft_id", ""))
+    elif name == "delete_email_draft":
+        return _delete_email_draft(args.get("draft_id", ""))
     elif name == "sync_emails":
         return _sync_emails(args.get("max_results", 30))
     # ── Briefing ──
@@ -1581,6 +1602,56 @@ def _sync_emails(max_results: int = 30) -> str:
             data = resp.json()
             return f"Synced {data.get('synced', 0)} emails."
         return f"Sync result: HTTP {resp.status_code}"
+    except Exception as e:
+        return f"Cannot sync: {e}. Connect Gmail in Settings."
+
+def _list_email_drafts() -> str:
+    """List AI-generated email drafts pending approval via VPS API."""
+    try:
+        import httpx
+        resp = httpx.get("http://localhost:8000/api/v1/messages/unified/drafts", timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            drafts = data if isinstance(data, list) else data.get("drafts", [])
+            if not drafts:
+                return "No pending email drafts found."
+            result = f"**Email Drafts ({len(drafts)}):**\n\n"
+            for d in drafts:
+                did = d.get("id", "?")
+                subj = d.get("subject", "(no subject)")
+                to = d.get("to", d.get("recipient", "?"))
+                result += f"  \u2022 **{subj}** \u2014 To: {to} (ID: {did})\n"
+            return result
+        return f"Failed to list drafts: HTTP {resp.status_code}"
+    except Exception as e:
+        return f"Cannot list drafts: {e}"
+
+def _approve_email_draft(draft_id: str) -> str:
+    """Approve and send an AI-generated email draft."""
+    if not draft_id:
+        return "Please provide a draft ID."
+    try:
+        import httpx
+        resp = httpx.post(f"http://localhost:8000/api/v1/gmail/drafts/{draft_id}/approve", timeout=15)
+        if resp.status_code == 200:
+            return f"Draft {draft_id} approved and sent."
+        return f"Approval failed: HTTP {resp.status_code}"
+    except Exception as e:
+        return f"Cannot approve draft: {e}"
+
+def _delete_email_draft(draft_id: str) -> str:
+    """Reject/delete an AI-generated email draft."""
+    if not draft_id:
+        return "Please provide a draft ID."
+    try:
+        import httpx
+        resp = httpx.delete(f"http://localhost:8000/api/v1/gmail/drafts/{draft_id}", timeout=15)
+        if resp.status_code == 200:
+            return f"Draft {draft_id} deleted."
+        return f"Delete failed: HTTP {resp.status_code}"
+    except Exception as e:
+        return f"Cannot delete draft: {e}"
+
     except Exception as e:
         return f"Cannot sync: {e}. Connect Gmail in Settings."
 

@@ -15,11 +15,11 @@ services:
       - key: REDIS_URL
         value: redis://redistogo:pass@host:6379
       - key: LLM_API_BASE
-        value: https://api.openai.com/v1
+        value: https://api.deepseek.com/v1
       - key: LLM_API_KEY
         sync: false
       - key: LLM_DEFAULT_MODEL
-        value: openai/gpt-4o-mini
+        value: deepseek-v4-flash
       - key: CORS_ORIGINS
         value: https://realty-e0vhn9ov6-jims-projects-5c5fd212.vercel.app
       - key: AUTH_SECRET_KEY

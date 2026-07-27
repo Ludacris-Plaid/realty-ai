@@ -198,7 +198,7 @@ class AthenaAgent:
         self.tools = _build_tools()
         
         # Build the LLM with cascading fallback across providers
-        # Try tiers: opencode-zen → 9router tunnel → featherless → nvidia
+        # Try tiers: DeepSeek → 9router tunnel → featherless → nvidia
         self.llm = self._build_llm(self.model_name)
         
         # Build a separate LLM instance for tool calling
@@ -232,11 +232,11 @@ class AthenaAgent:
             )
             return llm
         except Exception as e:
-            logger.error(f"ResilientLLM init failed, falling back to opencode-zen: {e}")
+            logger.error(f"ResilientLLM init failed, falling back to DeepSeek: {e}")
             return ChatOpenAI(
                 model=model_name,
-                base_url=os.environ.get("OPENCODE_ZEN_API_BASE", "https://opencode.ai/zen/v1"),
-                api_key=os.environ.get("OPENCODE_ZEN_API_KEY", "") or os.environ.get("LLM_API_KEY", ""),
+                base_url=os.environ.get("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1"),
+                api_key=os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("LLM_API_KEY", ""),
                 temperature=0.8,
                 max_tokens=4096,
             )

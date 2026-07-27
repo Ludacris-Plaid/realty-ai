@@ -492,3 +492,58 @@ def receive_webhook(request: Request):
     # For now, return a simple acknowledgment
     # Real implementation would map incoming messages to users
     return {"status": "received", "platform": platform, "sender": sender}
+# ─── Unified Inbox — Slack-style aggregation ───────────────────────────────
+
+@router.get(/unified)
+def unified_inbox(
+    limit: int = Query(50, le=100),
+    platform: Optional[str] = Query(None),
+    current_user: TokenPayload = Depends(require_user),
+):
+    """Unified inbox: merge all conversations + Gmail emails into Slack-style feed."""
+    db = _get_db()
+    try:
+        uid = UUID(current_user.sub)
+        results = []
+
+        # 1. Unified conversations
+        conv_query = select(UnifiedConversation).where(
+            UnifiedConversation.user_id == uid
+        )
+        if platform:
+            conv_query = conv_query.where(UnifiedConversation.platform == platform)
+        conv_query = conv_query.order_by(desc(UnifiedConversation.last_message_at)).limit(limit)
+        convs = db.execute(conv_query).scalars().all()
+
+        for c in convs:
+            # Get last message preview
+            last_msg = db.execute(
+                select(UnifiedMessage)
+                .where(UnifiedMessage.conversation_id == c.id)
+                .order_by(desc(UnifiedMessage.created_at))
+                .limit(1)
+            ).scalar_one_or_none()
+
+            msg_count = db.execute(
+                select(func.count()).select_from(UnifiedMessage)
+                .where(UnifiedMessage.conversation_id == c.id)
+            ).scalar() or 0
+
+            results.append({
+                id: str(c.id),
+                title: c.subject or Conversation,
+                platform: c.platform.value if isinstance(c.platform, MessagePlatform) else str(c.platform),
+                participants: c.meta_json.get(participants, []) if c.meta_json else [],
+                last_message: last_msg.content[:120] if last_msg else ,
+                last_message_at: c.last_message_at.isoformat() if c.last_message_at else ,
+                message_count: msg_count,
+                source: unified_conversation,
+                sender_name: ,
+                is_read: c.unread_count == 0,
+            })
+
+        # 2. Gmail emails (from synced_emails table)
+        try:
+            from sqlalchemy import text as sa_text
+            email_rows = db.execute(
+                sa_text(

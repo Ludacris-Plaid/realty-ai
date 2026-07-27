@@ -83,7 +83,7 @@ def main():
         print(f"  [{flag}] {ep['id']:<34} req_left={ep['budget']['requests_left']}")
     print()
     print("  Strategy: 9router is maxed first (specific upstreams, quota-aware")
-    print("  cooldowns), then the broader free pool; opencode-zen is the anchor.")
+    print("  cooldowns), then the broader free pool; deepseek-free is the anchor.")
     print("═" * 64)
 
 

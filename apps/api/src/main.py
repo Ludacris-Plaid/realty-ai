@@ -48,7 +48,7 @@ from hermes.tools import TOOL_DEFINITIONS
 
 # ─── Bot packages (lazy import for optional deps) ──────────────────────────
 
-from .config import settings
+import sys; sys.path.insert(0, "/app/apps/api/src"); from config import settings
 from .api.router import api_router
 from .auth import (
     create_access_token, get_current_user, get_current_user_optional,
@@ -770,7 +770,7 @@ async def athena_system_overview(current_user: Optional[TokenPayload] = Depends(
             "memory_total_gb": round(mem.total / (1024**3), 1),
         },
         "ai": {
-            "model": os.environ.get("LLM_DEFAULT_MODEL", "unsloth/Llama-3.2-3B-Instruct"),
+            "model": os.environ.get("LLM_DEFAULT_MODEL", "deepseek-v4-flash"),
             "fallback": os.environ.get("LLM_FALLBACK_MODEL", "meta/llama-3.1-8b-instruct"),
             "agents": [],
         }

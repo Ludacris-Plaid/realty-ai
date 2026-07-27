@@ -90,5 +90,5 @@ def get_router_stats() -> dict:
         "fast_model": get_fast_model(),
         "private_keywords": _PRIVATE_KEYWORDS,
         "complex_keywords": _COMPLEX_KEYWORDS,
-        "litellm_base": __import__("os").getenv("LLM_API_BASE", "http://localhost:4000"),
+        "litellm_base": __import__("os").getenv("LLM_API_BASE", "https://api.deepseek.com/v1"),
     }
