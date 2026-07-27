@@ -92,7 +92,58 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    """Health check - DB, disk, LLM, and memory status."""
+    import os, shutil, time
+    result = {"status": "ok", "checks": {}}
+
+    # DB check
+    try:
+        db_url = os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
+        if db_url:
+            from sqlalchemy import create_engine, text
+            engine = create_engine(db_url)
+            with engine.connect() as conn:
+                t0 = time.time()
+                conn.execute(text("SELECT 1"))
+                db_ms = int((time.time() - t0) * 1000)
+            result["checks"]["database"] = {"status": "ok", "latency_ms": db_ms}
+        else:
+            result["checks"]["database"] = {"status": "unconfigured"}
+    except Exception as e:
+        result["checks"]["database"] = {"status": "error", "message": str(e)[:100]}
+        result["status"] = "degraded"
+
+    # Disk check
+    try:
+        stat = shutil.disk_usage("/")
+        free_gb = round(stat.free / (1024**3), 1)
+        total_gb = round(stat.total / (1024**3), 1)
+        pct = round((stat.used / stat.total) * 100, 1)
+        result["checks"]["disk"] = {"status": "ok" if pct < 85 else "warning", "free_gb": free_gb, "total_gb": total_gb, "used_pct": pct}
+    except Exception as e:
+        result["checks"]["disk"] = {"status": "error", "message": str(e)[:100]}
+
+    # LLM check
+    try:
+        api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("LLM_API_KEY", "")
+        base_url = os.environ.get("DEEPSEEK_API_BASE") or os.environ.get("LLM_API_BASE", "")
+        model = os.environ.get("ATHENA_MODEL") or os.environ.get("LLM_DEFAULT_MODEL", "")
+        if api_key and base_url:
+            result["checks"]["llm"] = {"status": "configured", "model": model}
+        else:
+            result["checks"]["llm"] = {"status": "unconfigured"}
+    except Exception:
+        result["checks"]["llm"] = {"status": "unknown"}
+
+    # Overall status
+    has_error = any(v.get("status") == "error" for v in result["checks"].values())
+    has_warning = any(v.get("status") == "warning" for v in result["checks"].values())
+    if has_error:
+        result["status"] = "unhealthy"
+    elif has_warning:
+        result["status"] = "degraded"
+
+    return result
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -1842,8 +1893,12 @@ async def memories_alias(
     current_user: Optional[TokenPayload] = Depends(get_current_user_optional),
 ):
     """List memories with optional client_id and category filters."""
+    uid = current_user.sub if current_user else ""
     if mem0_available():
-        memories = mem0_get_all_memories(limit=limit)
+        if uid:
+            memories = mem0_get_all_memories(user_id=uid, limit=limit)
+        else:
+            memories = mem0_get_all_memories(limit=limit)
         return memories
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import Session
@@ -2017,3 +2072,32 @@ from .api.v1.unified_router import router as unified_msg_router
 app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
 
 # ═══════════════════════════════════════════════════════════════════════════
+
+
+@app.post("/api/v1/mem0/seed")
+async def seed_mem0(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """Seed existing athena_facts into Mem0."""
+    import os
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+    from hermes.mem0_adapter import add_interaction
+    from .config import settings
+
+    uid = current_user.sub if current_user else ""
+    if not uid:
+        return {"error": "Not authenticated", "seeded": 0}
+
+    db_url = getattr(settings, "database_url", "").replace("+asyncpg", "")
+    engine = create_engine(db_url)
+    seeded = 0
+
+    with Session(engine) as session:
+        facts = session.execute(
+            text("SELECT key, value, category FROM athena_facts WHERE user_id = :uid ORDER BY updated_at DESC"),
+            {"uid": uid}
+        ).fetchall()
+        for f in facts:
+            ok = add_interaction(f"Fact: {f[1]} (key: {f[0]}, category: {f[2]})", "Stored.", user_id=uid)
+            if ok: seeded += 1
+
+    return {"seeded": seeded, "total": len(facts) if facts else 0}

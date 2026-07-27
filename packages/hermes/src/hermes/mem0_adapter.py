@@ -170,7 +170,7 @@ def _create_mem0_instance():
                     },
                 ),
                 embedder=embedder,
-                llm=LlmConfig(provider="openai", config={"model": "gpt-4o-mini", "temperature": 0.1}),
+                llm=LlmConfig(provider="openai", config={"model": "deepseek-v4-flash", "temperature": 0.1, "api_key": "sk-c9b2042435c3493e8a57082e2d692b8a", "openai_base_url": "https://api.deepseek.com/v1"}),
                 history_db_path=os.path.join(MEM0_DIR, "mem0_history.db"),
                 version="v1.1",
             )
