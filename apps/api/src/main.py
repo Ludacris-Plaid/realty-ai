@@ -89,132 +89,6 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","
 app.include_router(api_router, prefix="/api/v1")
 
 
-
-@app.get("/api/v1/debug/drafts")
-async def debug_drafts_endpoint():
-    """Debug: test DB connection."""
-    import os as _os
-    db_url = _os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
-    result = {"db_url": db_url[:60]}
-    try:
-        from sqlalchemy import create_engine, text
-        engine = create_engine(db_url)
-        with engine.connect() as conn:
-            rows = conn.execute(
-                text("SELECT sender, LENGTH(ai_draft_reply), LEFT(ai_draft_reply, 60) FROM synced_emails WHERE ai_draft_reply IS NOT NULL ORDER BY LENGTH(ai_draft_reply) DESC LIMIT 3"),
-            ).fetchall()
-            result["rows"] = [{"sender": str(r[0]), "len": r[1], "body": str(r[2])} for r in rows]
-    except Exception as e:
-        result["error"] = str(e)
-    return result
-
-@app.get("/api/v1/messages/unified/drafts")
-async def unified_drafts_endpoint(
-    current_user: Optional[TokenPayload] = Depends(get_current_user_optional),
-):
-    """List pending email drafts from synced_emails (no auth required for now)."""
-    import os as _os
-    import sys as _sys
-    results = []
-    try:
-        from sqlalchemy import create_engine, text
-        from sqlalchemy.orm import Session
-        db_url = _os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
-        if not db_url:
-            return results
-        engine = create_engine(db_url)
-        with Session(engine) as session:
-            rows = session.execute(
-                text("SELECT id, sender, sender_name, subject, ai_classification, ai_draft_reply, ai_suggested_action, received_at FROM synced_emails WHERE ai_draft_reply IS NOT NULL AND LENGTH(ai_draft_reply) > 2 ORDER BY LENGTH(ai_draft_reply) DESC LIMIT 10"),
-            ).fetchall()
-            for r in rows:
-                body = str(r[5]) if r[5] else ""
-                if body and len(body) > 3:
-                    results.append({
-                        "id": "ai_" + str(r[0]),
-                        "to": str(r[1] or ""),
-                        "subject": "Re: " + str(r[3] or ""),
-                        "body": body[:500],
-                        "confidence": 80,
-                        "status": "ai_generated",
-                        "created_at": str(r[7]) if r[7] else "",
-                        "source": "ai_auto_reply",
-                        "sender_name": str(r[2] or r[1] or ""),
-                        "classification": str(r[4] or ""),
-                        "action": str(r[6] or ""),
-                        "email_id": str(r[0]),
-                    })
-    except Exception as e:
-        print("DRAFTS ERROR:", e, file=_sys.stderr)
-    return results
-
-@app.get("/api/v1/debug/drafts")
-async def debug_drafts_endpoint():
-    """Debug: test DB connection."""
-    import os as _os
-    db_url = _os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
-    result = {"db_url": db_url[:60]}
-    try:
-        from sqlalchemy import create_engine, text
-        engine = create_engine(db_url)
-        with engine.connect() as conn:
-            rows = conn.execute(
-                text("SELECT sender, LENGTH(ai_draft_reply), LEFT(ai_draft_reply, 60) FROM synced_emails WHERE ai_draft_reply IS NOT NULL ORDER BY LENGTH(ai_draft_reply) DESC LIMIT 3"),
-            ).fetchall()
-            result["rows"] = [{"sender": str(r[0]), "len": r[1], "body": str(r[2])} for r in rows]
-    except Exception as e:
-        result["error"] = str(e)
-    return result
-
-@app.get("/api/v1/messages/unified/drafts")
-async def unified_drafts_endpoint(
-    current_user: Optional[TokenPayload] = Depends(get_current_user_optional),
-):
-    """List pending email drafts from synced_emails."""
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
-    if not uid:
-        return []
-
-    import sys as _sys
-    results = []
-    try:
-        from sqlalchemy import create_engine, text
-        from sqlalchemy.orm import Session
-        db_url = os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
-        if not db_url:
-            print("DRAFTS ERROR: No DATABASE_URL", file=_sys.stderr)
-            return results
-        engine = create_engine(db_url)
-        with Session(engine) as session:
-            ai_rows = session.execute(
-                text("SELECT id::text, sender, sender_name, subject, ai_classification, ai_draft_reply, ai_suggested_action, received_at FROM synced_emails WHERE user_id = :uid AND ai_draft_reply IS NOT NULL ORDER BY received_at DESC LIMIT 10"),
-                {"uid": uid}
-            ).fetchall()
-            print(f"DRAFTS URL: {db_url[:50]} uid={uid}", file=_sys.stderr)
-            for r in ai_rows:
-                body = r[5] or ""
-                print(f"DRAFTS BODY: len={len(body)} strip_empty={bool(body.strip())} body_start={repr(body[:30])}", file=_sys.stderr)
-                if body and body.strip() and body.strip() != "{}":
-                    results.append({
-                        "id": "ai_" + str(r[0]),
-                        "to": r[1] or "",
-                        "subject": "Re: " + (r[3] or ""),
-                        "body": body[:500],
-                        "confidence": 80,
-                        "status": "ai_generated",
-                        "created_at": str(r[7]) if r[7] else "",
-                        "source": "ai_auto_reply",
-                        "sender_name": r[2] or r[1] or "",
-                        "classification": r[4] or "",
-                        "action": r[6] or "",
-                        "email_id": str(r[0]),
-                    })
-            print(f"DRAFTS: Returned {len(results)} results", file=_sys.stderr)
-    except Exception as e:
-        print(f"DRAFTS ERROR: {e}", file=_sys.stderr)
-        import traceback as _tb
-        _tb.print_exc(file=_sys.stderr)
-    return results
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -398,8 +272,18 @@ async def reject(approval_id: str, body: ApprovalAction, current_user: TokenPayl
     return {"status": "rejected", "approval": result}
 
 
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
 # ATHENA AGENT ENDPOINTS
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
 
 athena_agent = None  # Lazy init on first request
@@ -444,8 +328,18 @@ async def athena_state(current_user: Optional[TokenPayload] = Depends(get_curren
     return {"agent": agent.get_state(), "tools": TOOL_DEFINITIONS}
 
 
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
 # SCRAPER & DATA ENDPOINTS
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -490,7 +384,7 @@ class EventOut(BaseModel):
 @app.get("/api/v1/calendar/events")
 async def list_events(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """List calendar events from showings and activities."""
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
+    uid = current_user.sub if current_user else None
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
@@ -566,7 +460,7 @@ class CampaignOut(BaseModel):
 @app.get("/api/v1/campaigns")
 async def list_campaigns(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """List marketing campaigns."""
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
+    uid = current_user.sub if current_user else None
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
@@ -692,7 +586,7 @@ class RecommendationOut(BaseModel):
 @app.get("/api/v1/dashboard/recommendations")
 async def dashboard_recommendations(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Generate AI-powered recommendations based on current data."""
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
+    uid = current_user.sub if current_user else None
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
@@ -720,7 +614,10 @@ async def dashboard_recommendations(current_user: Optional[TokenPayload] = Depen
                 recent_activities = session.execute(
                     text("SELECT COUNT(*) FROM activities WHERE created_at >= NOW() - INTERVAL '7 days'")
                 ).scalar() or 0
-    except Exception:
+    except Exception as _ex:
+        import sys, traceback
+        print(f"UNIFIED ERROR: {_ex}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         lead_count = hot_leads = dormant_leads = active_listings = 0
         pending_listings = campaign_count = recent_activities = 0
 
@@ -838,7 +735,7 @@ async def athena_system_overview(current_user: Optional[TokenPayload] = Depends(
         leads = listings = hot = active = 0
     
     # Scope by user if authenticated
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
+    uid = current_user.sub if current_user else None
     if uid:
         try:
             from sqlalchemy import create_engine, text
@@ -911,8 +808,18 @@ async def new_conversation(current_user: Optional[TokenPayload] = Depends(get_cu
     return {"conversation_id": new_id, "message": "Fresh start. I'm ready for you."}
 
 
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
 # BOT WEBHOOK ENDPOINTS (Telegram, Slack)
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -1047,8 +954,18 @@ async def remove_bot_config(platform: str, current_user: TokenPayload = Depends(
     return {"ok": True, "platform": platform}
 
 
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
 # MEM0 MEMORY MANAGEMENT
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -1116,8 +1033,18 @@ async def memory_count(current_user: Optional[TokenPayload] = Depends(get_curren
     return {"count": count, "enabled": False}
 
 
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
 # FRONTEND ALIAS ROUTES — endpoints the V1 frontend expects
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
 
 # ─── Chat (alias from /chat to /athena/chat) ────────────────────────────
@@ -1190,7 +1117,7 @@ async def delete_conversation(conv_id: str, current_user: Optional[TokenPayload]
 @app.get("/api/v1/briefing")
 async def briefing_v1(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Daily AI briefing - frontend-compatible format."""
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
+    uid = current_user.sub if current_user else None
     from datetime import datetime
     hour = datetime.utcnow().hour
     greeting = f"Good {'morning' if hour < 12 else 'afternoon' if hour < 17 else 'evening'}, {current_user.name if current_user else 'Agent'}!"
@@ -1307,7 +1234,7 @@ def _row_to_client(r) -> dict:
 @app.get("/api/v1/clients")
 async def clients_list(search: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Alias: GET /api/v1/clients -> leads."""
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
+    uid = current_user.sub if current_user else None
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
@@ -1481,7 +1408,7 @@ async def clients_delete(client_id: str, current_user: TokenPayload = Depends(ge
 @app.get("/api/v1/tasks")
 async def tasks_list(status: str = "", client_id: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """List tasks."""
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
+    uid = current_user.sub if current_user else None
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
@@ -1572,7 +1499,7 @@ async def tasks_update(task_id: str, body: dict, current_user: TokenPayload = De
 @app.get("/api/v1/calendar/all")
 async def calendar_all(days: int = 7, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Alias: GET /api/v1/calendar/all -> calendar events + tasks."""
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
+    uid = current_user.sub if current_user else None
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
@@ -1789,7 +1716,7 @@ async def global_search(q: str = "", current_user: Optional[TokenPayload] = Depe
     """Global search across clients, properties, memories."""
     if not q:
         return {"clients": [], "properties": [], "memories": []}
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
+    uid = current_user.sub if current_user else None
     try:
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
@@ -1888,7 +1815,10 @@ async def oauth_google_status(current_user: Optional[TokenPayload] = Depends(get
         connected = row is not None
         configured = bool(os.environ.get("GOOGLE_CLIENT_ID", ""))
         return {"connected": connected, "configured": configured, "email": row[0] if row else None}
-    except Exception:
+    except Exception as _ex:
+        import sys, traceback
+        print(f"UNIFIED ERROR: {_ex}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         configured = bool(os.environ.get("GOOGLE_CLIENT_ID", ""))
         return {"connected": False, "configured": configured, "email": None}
 
@@ -2011,7 +1941,10 @@ async def memories_delete_alias(memory_id: str, current_user: TokenPayload = Dep
             session.execute(text("DELETE FROM athena_facts WHERE id = :id"), {"id": memory_id})
         session.commit()
         return {"status": "deleted"}
-    except Exception:
+    except Exception as _ex:
+        import sys, traceback
+        print(f"UNIFIED ERROR: {_ex}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return {"status": "not_found"}
 
 
@@ -2060,156 +1993,18 @@ async def listings_scrape_alias(
         return {"status": "error", "detail": str(e), "traceback": traceback.format_exc()}
 
 
+
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
-# UNIFIED INBOX — Slack-style aggregation endpoint
+
+
+
+from .api.v1.unified_router import router as unified_msg_router
+
+app.include_router(unified_msg_router, prefix="/api/v1/messages", tags=["unified-messages"])
+
 # ═══════════════════════════════════════════════════════════════════════════
-
-@app.get("/api/v1/messages/unified")
-async def unified_inbox_endpoint(
-    limit: int = 50,
-    platform: str = "",
-    current_user: Optional[TokenPayload] = Depends(get_current_user_optional),
-):
-    """Unified inbox: merge Gmail emails + conversations into Slack-style feed."""
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
-    if not uid:
-        return []
-
-    results = []
-    try:
-        from sqlalchemy import create_engine, text
-        from sqlalchemy.orm import Session
-        from .config import settings
-        db_url = getattr(settings, "database_url", "").replace("+asyncpg", "")
-        engine = create_engine(db_url)
-
-        with Session(engine) as session:
-            # 1. Gmail emails from synced_emails
-            email_sql = """
-                SELECT id::text, subject, sender, sender_name, snippet, ai_classification, is_unread, received_at
-                FROM synced_emails
-                WHERE user_id = :uid
-                ORDER BY received_at DESC
-            """
-            params = {"uid": uid}
-            if platform and platform == "email":
-                pass  # already filtering to email
-            email_sql += " LIMIT :lim"
-            params["lim"] = limit
-
-            email_rows = session.execute(text(email_sql), params).fetchall()
-            for row in email_rows:
-                results.append({
-                    "id": str(row[0]),
-                    "title": row[1] or "(no subject)",
-                    "platform": "email",
-                    "participants": [row[2] or ""],
-                    "last_message": row[4] or "",
-                    "last_message_at": str(row[7]) if row[7] else "",
-                    "message_count": 1,
-                    "source": "gmail",
-                    "sender_name": row[3] or row[2] or "",
-                    "is_read": not row[6] if row[6] is not None else True,
-                    "ai_classification": row[5],
-                })
-
-            # 2. Showings (calendar events as "events" platform)
-            showings_sql = """
-                SELECT id::text, lead_name, property_address, showing_time, status
-                FROM showings
-                WHERE user_id = :uid AND showing_time >= NOW()
-                ORDER BY showing_time ASC
-                LIMIT :lim
-            """
-            showing_rows = session.execute(text(showings_sql), {"uid": uid, "lim": limit}).fetchall()
-            for row in showing_rows:
-                results.append({
-                    "id": str(row[0]),
-                    "title": f"Showing: {row[1] or 'Client'} @ {row[2] or 'TBD'}",
-                    "platform": "calendar",
-                    "participants": [row[1] or ""],
-                    "last_message": f"Status: {row[4] or 'pending'}",
-                    "last_message_at": str(row[3]) if row[3] else "",
-                    "message_count": 1,
-                    "source": "showing",
-                    "sender_name": row[1] or "",
-                    "is_read": True,
-                })
-
-            # 3. Conversations (Athena chat history)
-            conv_sql = """
-                SELECT c.id::text, c.title, c.updated_at,
-                       (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as last_msg,
-                       (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) as msg_count
-                FROM conversations c
-                WHERE c.user_id = :uid
-                ORDER BY c.updated_at DESC
-                LIMIT :lim
-            """
-            conv_rows = session.execute(text(conv_sql), {"uid": uid, "lim": limit}).fetchall()
-            for row in conv_rows:
-                results.append({
-                    "id": str(row[0]),
-                    "title": row[1] or "Chat",
-                    "platform": "chat",
-                    "participants": ["Athena"],
-                    "last_message": (str(row[3]) or "")[:120] if row[3] else "",
-                    "last_message_at": str(row[2]) if row[2] else "",
-                    "message_count": row[4] or 0,
-                    "source": "conversation",
-                    "sender_name": "Athena",
-                    "is_read": True,
-                })
-    except Exception as e:
-        logger.warning(f"Unified inbox error: {e}")
-        import traceback
-        logger.warning(traceback.format_exc())
-
-    results.sort(key=lambda x: x.get("last_message_at", ""), reverse=True)
-    return results[:limit]
-
-
-@app.post("/api/v1/messages/unified/drafts/generate")
-async def generate_missing_drafts(
-    current_user: Optional[TokenPayload] = Depends(get_current_user_optional),
-):
-    """Generate AI draft replies for all synced emails that lack them."""
-    uid = current_user.sub if current_user else None; print(f"DRAFTS AUTH: uid={uid} type={type(uid).__name__} current_user={current_user}", file=__import__("sys").stderr)
-    if not uid:
-        return {"error": "Not authenticated"}
-    
-    import asyncio as _asyncio
-    
-    try:
-        from sqlalchemy import create_engine, text
-        from sqlalchemy.orm import Session
-        from .config import settings
-        db_url = getattr(settings, "database_url", "").replace("+asyncpg", "")
-        engine = create_engine(db_url)
-        
-        generated = 0
-        with Session(engine) as session:
-            rows = session.execute(
-                text("""SELECT id::text, sender, sender_name, subject, body, snippet, ai_classification FROM synced_emails WHERE user_id = :uid AND (ai_draft_reply IS NULL OR ai_draft_reply = '') ORDER BY received_at DESC LIMIT 20"""),
-                {"uid": uid}
-            ).fetchall()
-            
-            for row in rows:
-                email = {
-                    "id": row[0], "sender": row[1] or "", "sender_name": row[2] or "",
-                    "subject": row[3] or "", "body_plain": row[4] or "",
-                    "snippet": row[5] or "",
-                }
-                draft = await _asyncio.get_event_loop().run_in_executor(None, _inline_generate_draft, email)
-                if draft and draft.get("body"):
-                    session.execute(
-                        text("UPDATE synced_emails SET ai_draft_reply = :draft, ai_classification = :cls, ai_suggested_action = :action WHERE id::text = :id"),
-                        {"draft": draft["body"], "cls": draft["classification"], "action": draft["action"], "id": row[0]}
-                    )
-                    generated += 1
-            session.commit()
-        
-        return {"generated": generated, "total_processed": len(rows) if 'rows' in dir() else 0}
-    except Exception as e:
-        logger.warning(f"Draft generation error: {e}")
-        return {"error": str(e), "generated": 0}
