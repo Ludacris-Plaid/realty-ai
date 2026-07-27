@@ -18,7 +18,7 @@ const primaryItems = [
   { label: "Leads", href: "/dashboard/leads", icon: Users },
   { label: "Listings", href: "/dashboard/listings", icon: Building2 },
   { label: "Calendar", href: "/dashboard/calendar", icon: Calendar },
-  { label: "Email", href: "/dashboard/email", icon: Mail },
+  { label: "Messages", href: "/dashboard/messages", icon: Mail },
   { label: "Documents", href: "/dashboard/documents", icon: FileText },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
