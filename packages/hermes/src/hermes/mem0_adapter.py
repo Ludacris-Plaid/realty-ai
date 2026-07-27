@@ -163,15 +163,15 @@ def _create_mem0_instance():
                 vector_store=VectorStoreConfig(
                     provider="qdrant",
                     config={
-                        "path": os.path.join(MEM0_DIR, "qdrant"),
+                        "url": "https://91dab7b4-b767-485e-b8bf-5be2e7b9e8bf.us-west-2-0.aws.cloud.qdrant.io",
+                        "api_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6ZGU1MGFmY2ItYzMxNi00YzBjLTkyNGMtNmIxNDc3ZjRiYjVlIn0.Xis81ciTM_DV6MgZPt8sP1yyR9gk_KbamnG892bs79Q",
                         "collection_name": "athena_memories",
                         "embedding_model_dims": dims,
-                        "on_disk": True,
                     },
                 ),
                 embedder=embedder,
                 llm=LlmConfig(provider="openai", config={"model": "deepseek-v4-flash", "temperature": 0.1, "api_key": "sk-c9b2042435c3493e8a57082e2d692b8a", "openai_base_url": "https://api.deepseek.com/v1"}),
-                history_db_path=os.path.join(MEM0_DIR, "mem0_history.db"),
+                history_db_path="/data/mem0_history.db",
                 version="v1.1",
             )
             instance = Memory(config=config)
