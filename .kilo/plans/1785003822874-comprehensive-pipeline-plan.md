@@ -171,7 +171,7 @@
 ## Deployment & Verification
 
 After each phase, verify:
-1. `railway up --detach` → backend deploys
+1. `bash deploy.sh` → backend deploys via Docker
 2. Vercel auto-deploys frontend
 3. `curl` test the API endpoints
 4. Browser test at `realty-ai-ten.vercel.app` or `realty.indicationsmedia.com`

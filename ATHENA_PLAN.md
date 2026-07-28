@@ -57,7 +57,7 @@
 - [x] System overview, memory view, stat cards
 - [x] Basic tool calling (16 tools: leads, listings, documents, etc.)
 - [x] 4-tier LLM fallback chain (OpenCode Zen → 9router → Featherless → NVIDIA)
-- [x] Railway backend + Vercel frontend deployment pipeline
+- [x] VPS backend (185.80.130.197:8000) + Vercel frontend deployment pipeline
 
 **Issues carried forward:**
 - Tool calling emits raw XML on hy3-free model (no structured function-calling)
@@ -76,7 +76,7 @@
 | 2.2 | Telegram bot adapter | ✅ Done | `bots.telegram` module — handles webhook updates, sends typing indicator, routes to Athena, formats responses. `set_webhook()` to register URL. Enable by setting `TELEGRAM_BOT_TOKEN` env var. |
 | 2.3 | Slack bot adapter | ✅ Done | `bots.slack` module — handles Events API (messages), verifies Slack signing secret, handles URL verification challenge, routes to Athena. Enable by setting `SLACK_BOT_TOKEN` + `SLACK_SIGNING_SECRET` env vars. |
 | 2.4 | Bot status dashboard | ✅ Done | `GET /api/v1/athena/bots/status` — shows which integrations are configured. |
-| 2.5 | Integrate Mem0 | 🟡 Partial | Adapter exists (`hermes/mem0_adapter.py`) with Qdrant vector store, automatic entity extraction, semantic search, cross-session context retrieval. Wired into `agent.py` post-chat learning loop + memory injection. Needs production verification: pip package install, init timeout on Railway, Qdrant disk usage. |
+| 2.5 | Integrate Mem0 | 🟡 Partial | Adapter exists (`hermes/mem0_adapter.py`) with Qdrant vector store, automatic entity extraction, semantic search, cross-session context retrieval. Wired into `agent.py` post-chat learning loop + memory injection. Needs production verification: pip package install, init timeout on VPS, Qdrant disk usage. |
 | 2.6 | User profiles | ☐ Pending | Multi-agent firm support — each agent has their own Athena profile, memory, and preferences. Requires auth layer. |
 | 2.7 | Conversation search | 🟡 Partial | FTS5 full-text search on past conversations works (SQLite). Semantic cross-session search via Mem0 works. No unified search UI combining both. |
 | 2.8 | Cross-session context | ☐ Pending | Mem0 `get_relevant_context()` wired into system prompt, but greeting is still generic ("Good morning") — no personalized "Welcome back, Mike's offer was accepted" yet. |

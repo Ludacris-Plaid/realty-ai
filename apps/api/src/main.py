@@ -938,10 +938,6 @@ async def telegram_set_webhook(current_user: TokenPayload = Depends(get_current_
         
         base_url = os.environ.get("PUBLIC_URL", "")
         if not base_url:
-            base_url = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
-            if base_url:
-                base_url = f"https://{base_url}"
-        if not base_url:
             return {"ok": False, "error": "PUBLIC_URL not set"}
         webhook_url = f"{base_url.rstrip('/')}/api/v1/athena/telegram/webhook"
         result = await set_webhook(webhook_url, token=token)

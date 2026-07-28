@@ -16,3 +16,6 @@ docker-data/
 coverage/
 data/
 *.tsbuildinfo
+.vercel
+railway.json
+railway.toml

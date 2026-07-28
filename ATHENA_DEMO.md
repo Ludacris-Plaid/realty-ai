@@ -61,7 +61,7 @@ Try these demo prompts:
                            │ HTTPS / JWT Auth
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Railway (Backend API)                        │
+│                   VPS (185.80.130.197:8000)                      │
 │  FastAPI · SQLAlchemy · LangChain · Athena Agent                │
 │                                                                 │
 │  /api/v1/auth        — Login, Register, Profile                 │
@@ -76,7 +76,7 @@ Try these demo prompts:
               ▼            ▼            ▼
 ┌─────────────────┐ ┌──────────┐ ┌──────────────┐
 │   PostgreSQL    │ │  Mem0    │ │  Free LLM    │
-│  (Railway)      │ │ (Memories)│ │  Pool        │
+│  (VPS)          │ │ (Memories)│ │  Pool        │
 │  properties     │ │          │ │  deepseek-v4  │
 │  leads          │ │          │ │  mimo-v2.5    │
 │  campaigns      │ │          │ │  opencode-zen │
@@ -246,11 +246,11 @@ Use `check_scraper_sources` to see what's installed:
 ---
 
 ## Deployment
+### Backend (VPS)
 
-### Backend (Railway)
-- **URL:** https://realty-ai-api-production.up.railway.app
+- **URL:** http://185.80.130.197:8000
 - **Stack:** FastAPI, SQLAlchemy, LangChain
-- **Database:** PostgreSQL (managed by Railway)
+- **Database:** PostgreSQL (managed via Docker on VPS)
 - **Memory:** Local SQLite + Mem0 (per-user)
 
 ### Frontend (Vercel)
@@ -288,7 +288,7 @@ The `ResilientLLM` class rotates across providers and falls through on ANY failu
 | Resource | URL / Credentials |
 |----------|-------------------|
 | **Frontend** | https://realty-ai-ten.vercel.app |
-| **Backend API** | https://realty-ai-api-production.up.railway.app |
+| **Backend API** | http://185.80.130.197:8000 |
 | **Demo Email** | `demo@realtyai.demo` |
 | **Demo Password** | `Demo123!` |
 | **Health Check** | `GET /health` |
@@ -315,11 +315,11 @@ The `ResilientLLM` class rotates across providers and falls through on ANY failu
 1. **Wire Settings save** → frontend POST to `/api/v1/auth/profile`
 2. **Wire Dashboard recommendations** → fetch from API endpoint
 3. **Wire Documents icons** → sparkle (AI summary) + download handlers
-4. **Install Obscura on Railway** → add binary and enable stealth
+4. **Install Obscura on VPS** → add binary and enable stealth
 5. **Install Browser-Use** → `pip install browser-use` + Playwright
 6. **Install Agent-Reach** → enables 15+ platforms
 7. **Hermes Browser Extension** → real-time browser context for Athena
-8. **Run scraper against Railway DB** → populate real property/lead data
+8. **Run scraper against VPS DB** → populate real property/lead data
 9. **Daily market briefing** → automatically scraped and summarized by Athena
 
 ---

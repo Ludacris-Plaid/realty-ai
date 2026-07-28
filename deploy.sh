@@ -2,6 +2,7 @@
 set -e
 
 # RealtyAI Production Deploy Script
+# Builds Docker image and deploys to local VPS environment
 # Run as: bash deploy.sh
 
 cd "$(dirname "$0")"
@@ -23,7 +24,7 @@ docker run -d --name realty-api \
   -e LLM_FALLBACK_API_BASE=https://integrate.api.nvidia.com/v1 \
   -e LLM_FALLBACK_API_KEY=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 \
   -e LLM_FALLBACK_MODEL=meta/llama-3.1-8b-instruct \
-  -e CORS_ORIGINS="http://localhost:3000,https://realty-ai-ten.vercel.app" \
+  -e CORS_ORIGINS="http://localhost:3000,https://realty-ai-ten.vercel.app,https://realty.indicationsmedia.com" \
   -e AUTH_SECRET_KEY=realty-ai-prod-secret \
   realty-ai-api:latest
 
