@@ -292,6 +292,31 @@ TOOL_DEFINITIONS = [
         "parameters": {"draft_id": {"type": "string", "description": "UUID of the draft to delete", "required": True}}
     },
     {
+        "name": "delete_email",
+        "description": "Delete/trash an email from your inbox. Removes from local DB and Gmail.",
+        "parameters": {"email_id": {"type": "string", "description": "Email UUID to delete", "required": True}}
+    },
+    {
+        "name": "mark_email_read",
+        "description": "Mark an email as read or unread in your inbox.",
+        "parameters": {"email_id": {"type": "string", "description": "Email UUID", "required": True}, "unread": {"type": "boolean", "description": "true=mark unread, false=mark read", "required": False}}
+    },
+    {
+        "name": "report_spam",
+        "description": "Report an email as spam. Moves to Gmail SPAM folder and removes from local inbox.",
+        "parameters": {"email_id": {"type": "string", "description": "Email UUID to mark as spam", "required": True}}
+    },
+    {
+        "name": "classify_email",
+        "description": "Set or update the AI classification label on an email.",
+        "parameters": {"email_id": {"type": "string", "description": "Email UUID", "required": True}, "classification": {"type": "string", "description": "Label like buyer_lead, spam, follow_up, pre_approval", "required": True}}
+    },
+    {
+        "name": "clean_inbox",
+        "description": "Scan entire inbox for spam emails and auto-delete them. Uses keyword + sender analysis.",
+        "parameters": {}
+    },
+    {
         "name": "get_briefing",
         "description": "Get today's daily briefing with business summary, insights, and priorities. Auto-generates if needed.",
         "parameters": {}
@@ -489,6 +514,16 @@ def execute_tool(name: str, args: dict) -> str:
         return _approve_email_draft(args.get("draft_id", ""))
     elif name == "delete_email_draft":
         return _delete_email_draft(args.get("draft_id", ""))
+    elif name == "delete_email":
+        return _delete_email(args.get("email_id", ""))
+    elif name == "mark_email_read":
+        return _mark_email_read(args.get("email_id", ""), args.get("unread", False))
+    elif name == "report_spam":
+        return _report_spam(args.get("email_id", ""))
+    elif name == "classify_email":
+        return _classify_email(args.get("email_id", ""), args.get("classification", ""))
+    elif name == "clean_inbox":
+        return _clean_inbox()
     elif name == "sync_emails":
         return _sync_emails(args.get("max_results", 30))
     # ── Briefing ──
@@ -1652,8 +1687,84 @@ def _delete_email_draft(draft_id: str) -> str:
     except Exception as e:
         return f"Cannot delete draft: {e}"
 
+
+# ── Email Management Implementations ──
+
+_API_BASE = "http://localhost:8000"
+
+def _delete_email(email_id: str) -> str:
+    """Delete/trash an email from inbox."""
+    if not email_id:
+        return "Please provide an email ID."
+    try:
+        import httpx
+        resp = httpx.delete(f"{_API_BASE}/api/v1/gmail/emails/{email_id}", timeout=15)
+        if resp.status_code == 200:
+            return f"Email {email_id[:8]}... deleted from inbox."
+        return f"Delete failed: HTTP {resp.status_code}"
     except Exception as e:
-        return f"Cannot sync: {e}. Connect Gmail in Settings."
+        return f"Cannot delete email: {e}"
+
+def _mark_email_read(email_id: str, unread: bool = False) -> str:
+    """Mark an email as read or unread."""
+    if not email_id:
+        return "Please provide an email ID."
+    try:
+        import httpx
+        resp = httpx.patch(
+            f"{_API_BASE}/api/v1/gmail/emails/{email_id}",
+            json={"is_unread": unread},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            action = "unread" if unread else "read"
+            return f"Email {email_id[:8]}... marked as {action}."
+        return f"Failed: HTTP {resp.status_code}"
+    except Exception as e:
+        return f"Cannot mark email: {e}"
+
+def _report_spam(email_id: str) -> str:
+    """Report an email as spam."""
+    if not email_id:
+        return "Please provide an email ID."
+    try:
+        import httpx
+        resp = httpx.post(f"{_API_BASE}/api/v1/gmail/emails/{email_id}/spam", timeout=15)
+        if resp.status_code == 200:
+            return f"Email {email_id[:8]}... reported as spam and removed from inbox."
+        return f"Failed: HTTP {resp.status_code}"
+    except Exception as e:
+        return f"Cannot report spam: {e}"
+
+def _classify_email(email_id: str, classification: str) -> str:
+    """Set the AI classification on an email."""
+    if not email_id or not classification:
+        return "Please provide email ID and classification."
+    try:
+        import httpx
+        resp = httpx.patch(
+            f"{_API_BASE}/api/v1/gmail/emails/{email_id}",
+            json={"ai_classification": classification},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return f"Email {email_id[:8]}... classified as '{classification}'."
+        return f"Failed: HTTP {resp.status_code}"
+    except Exception as e:
+        return f"Cannot classify email: {e}"
+
+def _clean_inbox() -> str:
+    """Scan inbox for spam and auto-delete."""
+    try:
+        import httpx
+        resp = httpx.post(f"{_API_BASE}/api/v1/gmail/scan-spam", timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("message", f"Spam scan complete. {data.get('deleted', 0)} removed.")
+        return f"Spam scan failed: HTTP {resp.status_code}"
+    except Exception as e:
+        return f"Cannot scan inbox: {e}"
+
 
 # ── Briefing Implementations ──
 

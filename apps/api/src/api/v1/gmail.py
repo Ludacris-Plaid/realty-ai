@@ -808,3 +808,270 @@ def reject_draft(
         )
         session.commit()
     return {"status": "rejected"}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# EMAIL MANAGEMENT ENDPOINTS (trash, spam, mark read, classify, scan)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class EmailActionRequest(BaseModel):
+    action: str  # "trash" | "delete" | "spam"
+
+
+class EmailPatchRequest(BaseModel):
+    is_unread: bool | None = None
+    ai_classification: str | None = None
+    ai_suggested_action: str | None = None
+
+
+_SPAM_KEYWORDS = [
+    "buy now", "limited time", "act now", "congratulations", "you won", "winner",
+    "free money", "click here", "urgent", "exclusive offer", "guaranteed",
+    "no risk", "act fast", "don't miss", "clearance", "cash bonus",
+    "earn extra", "work from home", "make money", "million dollars",
+    "investment opportunity", "unsecured debt", "credit score",
+    "refinance", "consolidate debt", "pre-approved", "pre approved",
+    "viagra", "cialis", "pharmacy", "prescription", "weight loss",
+]
+
+_SPAM_SENDERS = [
+    "noreply@", "no-reply@", "newsletter@", "marketing@", "mail@",
+    "mailer@", "bounce@", "spam@", "promotions@",
+]
+
+_SPAM_DOMAINS = [
+    "mailchimp.com", "sendgrid.net", "hubspot.com", "salesforce.com",
+    "constantcontact.com", "mailerlite.com", "convertkit.com",
+]
+
+
+def _detect_spam(email_row) -> tuple[bool, str]:
+    """Check an email for spam indicators. Returns (is_spam, reason)."""
+    subj = (email_row.get("subject") or "").lower()
+    sender = (email_row.get("sender") or "").lower()
+    body = (email_row.get("body") or "").lower()[:500]
+    combined = f"{subj} {body}"
+
+    for kw in _SPAM_KEYWORDS:
+        if kw in combined:
+            return True, f"Spam keyword: '{kw}'"
+
+    for s in _SPAM_SENDERS:
+        if sender.startswith(s):
+            return True, f"Suspicious sender pattern: {s}"
+
+    for d in _SPAM_DOMAINS:
+        if d in sender:
+            return True, f"Known mass-mailer domain: {d}"
+
+    return False, ""
+
+
+@router.delete("/emails/{email_id}")
+def delete_email(
+    email_id: str,
+    current_user: TokenPayload = Depends(require_user),
+):
+    """Permanently delete a synced email from local DB."""
+    _ensure_emails_table()
+    with Session(_shared_engine) as session:
+        row = session.execute(
+            text("SELECT gmail_message_id FROM synced_emails WHERE id = :id AND user_id = :uid"),
+            {"id": email_id, "uid": current_user.sub},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Email not found")
+
+        # Also trash in Gmail if connected
+        creds = _get_stored_credentials(current_user.sub)
+        if creds and HAS_GMAIL_LIB:
+            try:
+                gcred = Credentials(
+                    token=creds["access_token"],
+                    refresh_token=creds.get("refresh_token", ""),
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=creds["client_id"],
+                    client_secret=creds["client_secret"],
+                )
+                service = build("gmail", "v1", credentials=gcred)
+                service.users().messages().trash(userId="me", id=row[0]).execute()
+            except Exception as e:
+                logger.warning(f"Gmail trash failed (DB delete continues): {e}")
+
+        session.execute(
+            text("DELETE FROM synced_emails WHERE id = :id AND user_id = :uid"),
+            {"id": email_id, "uid": current_user.sub},
+        )
+        session.commit()
+
+    return {"status": "deleted", "id": email_id}
+
+
+@router.patch("/emails/{email_id}")
+def patch_email(
+    email_id: str,
+    body: EmailPatchRequest,
+    current_user: TokenPayload = Depends(require_user),
+):
+    """Update email properties: mark read/unread, change classification."""
+    _ensure_emails_table()
+    updates = []
+    params: dict = {"id": email_id, "uid": current_user.sub}
+
+    if body.is_unread is not None:
+        updates.append("is_unread = :unread")
+        params["unread"] = body.is_unread
+    if body.ai_classification is not None:
+        updates.append("ai_classification = :cls")
+        params["cls"] = body.ai_classification
+    if body.ai_suggested_action is not None:
+        updates.append("ai_suggested_action = :action")
+        params["action"] = body.ai_suggested_action
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    query = f"UPDATE synced_emails SET {', '.join(updates)} WHERE id = :id AND user_id = :uid"
+    with Session(_shared_engine) as session:
+        result = session.execute(text(query), params)
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Email not found")
+        session.commit()
+
+    return {"status": "updated", "id": email_id}
+
+
+@router.post("/emails/{email_id}/spam")
+def report_spam(
+    email_id: str,
+    current_user: TokenPayload = Depends(require_user),
+):
+    """Mark email as spam in Gmail and delete from local inbox."""
+    _ensure_emails_table()
+    with Session(_shared_engine) as session:
+        row = session.execute(
+            text("SELECT gmail_message_id FROM synced_emails WHERE id = :id AND user_id = :uid"),
+            {"id": email_id, "uid": current_user.sub},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Email not found")
+        gmail_id = row[0]
+
+        # Report spam in Gmail if connected
+        creds = _get_stored_credentials(current_user.sub)
+        spam_reported = False
+        if creds and HAS_GMAIL_LIB:
+            try:
+                gcred = Credentials(
+                    token=creds["access_token"],
+                    refresh_token=creds.get("refresh_token", ""),
+                    token_uri="https://oauth2.googleapis.com/token",
+                    client_id=creds["client_id"],
+                    client_secret=creds["client_secret"],
+                )
+                service = build("gmail", "v1", credentials=gcred)
+                service.users().messages().modify(
+                    userId="me", id=gmail_id,
+                    body={"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]},
+                ).execute()
+                spam_reported = True
+            except Exception as e:
+                logger.warning(f"Gmail spam report failed: {e}")
+
+        # Remove from local inbox
+        session.execute(
+            text("DELETE FROM synced_emails WHERE id = :id AND user_id = :uid"),
+            {"id": email_id, "uid": current_user.sub},
+        )
+        session.commit()
+
+    return {
+        "status": "spam_reported" if spam_reported else "deleted_locally",
+        "id": email_id,
+        "gmail_spam_reported": spam_reported,
+    }
+
+
+@router.post("/scan-spam")
+def scan_inbox_for_spam(
+    current_user: TokenPayload = Depends(require_user),
+):
+    """Scan all synced inbox emails for spam and delete them automatically."""
+    _ensure_emails_table()
+    with Session(_shared_engine) as session:
+        rows = session.execute(
+            text("""
+                SELECT id, gmail_message_id, subject, sender, body
+                FROM synced_emails
+                WHERE user_id = :uid AND
+                      (ai_classification IS NULL OR ai_classification NOT IN ('spam', 'spam_detected'))
+                ORDER BY received_at DESC
+            """),
+            {"uid": current_user.sub},
+        ).fetchall()
+
+    deleted = 0
+    spam_ids = []
+    creds = _get_stored_credentials(current_user.sub)
+
+    # Build Gmail service once if connected
+    gmail_service = None
+    if creds and HAS_GMAIL_LIB:
+        try:
+            gcred = Credentials(
+                token=creds["access_token"],
+                refresh_token=creds.get("refresh_token", ""),
+                token_uri="https://oauth2.googleapis.com/token",
+                client_id=creds["client_id"],
+                client_secret=creds["client_secret"],
+            )
+            gmail_service = build("gmail", "v1", credentials=gcred)
+        except Exception:
+            pass
+
+    for row in rows:
+        row_dict = {"subject": row.subject, "sender": row.sender, "body": row.body}
+        is_spam, reason = _detect_spam(row_dict)
+        if is_spam:
+            spam_ids.append(row.id)
+            # Mark in DB
+            with Session(_shared_engine) as session:
+                session.execute(
+                    text("""
+                        UPDATE synced_emails
+                        SET ai_classification = 'spam_detected',
+                            ai_suggested_action = 'auto_deleted'
+                        WHERE id = :id AND user_id = :uid
+                    """),
+                    {"id": row.id, "uid": current_user.sub},
+                )
+                session.commit()
+
+            # Report spam in Gmail
+            if gmail_service and row.gmail_message_id:
+                try:
+                    gmail_service.users().messages().modify(
+                        userId="me", id=row.gmail_message_id,
+                        body={"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]},
+                    ).execute()
+                except Exception:
+                    pass
+
+            # Delete from local inbox
+            with Session(_shared_engine) as session:
+                session.execute(
+                    text("DELETE FROM synced_emails WHERE id = :id AND user_id = :uid"),
+                    {"id": row.id, "uid": current_user.sub},
+                )
+                session.commit()
+            deleted += 1
+
+    if deleted == 0:
+        return {"status": "clean", "deleted": 0, "message": "Inbox looks clean. No spam detected."}
+
+    return {
+        "status": "cleaned",
+        "deleted": deleted,
+        "message": f"Found and removed {deleted} spam email(s) from your inbox."
+    }
