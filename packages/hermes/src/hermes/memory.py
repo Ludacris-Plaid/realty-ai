@@ -147,7 +147,8 @@ except Exception as _e:
 # ─── User Facts ───────────────────────────────────────────────────────────────
 
 def remember(key: str, value: str, category: str = "general",
-             confidence: float = 1.0, source: str = "inference"):
+             confidence: float = 1.0, source: str = "inference",
+             user_id: str = ""):
     """Store a fact about the user. Upserts if key exists.
     
     Guards: empty key or value are silently rejected to avoid
@@ -163,15 +164,15 @@ def remember(key: str, value: str, category: str = "general",
     value = value.strip()
     with Session(_engine) as s:
         s.execute(text("""
-            INSERT INTO athena_facts (category, key, value, confidence, source, updated_at)
-            VALUES (:cat, :key, :val, :conf, :src, NOW())
+            INSERT INTO athena_facts (category, key, value, confidence, source, updated_at, user_id)
+            VALUES (:cat, :key, :val, :conf, :src, NOW(), :uid)
             ON CONFLICT (key) DO UPDATE SET
                 value      = EXCLUDED.value,
                 confidence = GREATEST(athena_facts.confidence, EXCLUDED.confidence),
                 updated_at = NOW(),
                 source     = CASE WHEN EXCLUDED.source = 'explicit'
                                   THEN 'explicit' ELSE athena_facts.source END
-        """), {"cat": category, "key": key, "val": value, "conf": confidence, "src": source})
+        """), {"cat": category, "key": key, "val": value, "conf": confidence, "src": source, "uid": user_id})
         s.commit()
 
 
@@ -181,20 +182,22 @@ def forget(key: str):
         s.commit()
 
 
-def get_user_profile() -> dict:
+def get_user_profile(user_id: str = "") -> dict:
     with Session(_engine) as s:
         rows = s.execute(text("""
             SELECT category, key, value, confidence
-            FROM athena_facts ORDER BY category, confidence DESC
-        """)).fetchall()
+            FROM athena_facts
+            WHERE user_id = :uid OR user_id = ''
+            ORDER BY category, confidence DESC
+        """), {"uid": user_id}).fetchall()
     profile: dict = {}
     for cat, key, val, conf in rows:
         profile.setdefault(cat, []).append({"key": key, "value": val, "confidence": conf})
     return profile
 
 
-def profile_summary() -> str:
-    profile = get_user_profile()
+def profile_summary(user_id: str = "") -> str:
+    profile = get_user_profile(user_id=user_id)
     if not profile:
         return "I'm still getting to know you."
     parts = []

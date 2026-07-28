@@ -765,7 +765,7 @@ async def athena_memory(query: str = "", current_user: Optional[TokenPayload] = 
         from hermes.memory import _engine as _mem_engine
         with _Session(_mem_engine) as _s:
             fact_rows = _s.execute(
-                _stext("SELECT category, key, value, confidence FROM athena_facts WHERE user_id = :uid ORDER BY category, confidence DESC"),
+                _stext("SELECT category, key, value, confidence FROM athena_facts WHERE user_id = :uid OR user_id = '' ORDER BY category, confidence DESC"),
                 {"uid": uid},
             ).fetchall()
         if fact_rows:
