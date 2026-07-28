@@ -756,9 +756,32 @@ async def dashboard_recommendations(current_user: Optional[TokenPayload] = Depen
 
 @app.get("/api/v1/athena/memory")
 async def athena_memory(query: str = "", current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """Search Athena's memory (facts, conversations, notes)."""
+    """Search Athena's memory (facts, conversations, notes) scoped to current user."""
+    uid = current_user.sub if current_user else ""
     if not query:
-        return {"profile": profile_summary(), "skills": get_skills()}
+        # Scope profile and skills to user
+        from sqlalchemy import text as _stext
+        from sqlalchemy.orm import Session as _Session
+        from hermes.memory import _engine as _mem_engine
+        with _Session(_mem_engine) as _s:
+            fact_rows = _s.execute(
+                _stext("SELECT category, key, value, confidence FROM athena_facts WHERE user_id = :uid ORDER BY category, confidence DESC"),
+                {"uid": uid},
+            ).fetchall()
+        if fact_rows:
+            profile = ""
+            cats: dict = {}
+            for cat, key, val, conf in fact_rows:
+                cats.setdefault(cat, []).append({"key": key, "value": val, "confidence": conf})
+            parts = []
+            for cat, facts in cats.items():
+                items = [f"  - {f['key']}: {f['value']}" for f in facts[:5]]
+                parts.append(f"**{cat.title()}**:\n" + "\n".join(items))
+            profile = "\n\n".join(parts)
+        else:
+            profile = "I'm still getting to know you."
+        skills = get_skills()
+        return {"profile": profile, "skills": skills}
     facts = recall(query)
     convs = search_memory_conversations(query)
     notes = search_notes(query)
@@ -1044,9 +1067,10 @@ def _facts_to_memories():
 
 @app.get("/api/v1/athena/memories")
 async def list_memories(limit: int = 50, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """List all stored memories. Uses Mem0 when available, falls back to PostgreSQL facts."""
+    """List all stored memories for the current user."""
+    uid = current_user.sub if current_user else ""
     if mem0_available():
-        memories = mem0_get_all_memories(limit=limit)
+        memories = mem0_get_all_memories(user_id=uid, limit=limit)
         return {"memories": memories, "count": len(memories), "enabled": True}
     # Fallback: return PostgreSQL facts
     memories = _facts_to_memories()
@@ -1055,11 +1079,12 @@ async def list_memories(limit: int = 50, current_user: Optional[TokenPayload] = 
 
 @app.get("/api/v1/athena/memories/search")
 async def search_memories(query: str = "", limit: int = 10, current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """Semantic search across memories."""
+    """Semantic search across memories for the current user."""
+    uid = current_user.sub if current_user else ""
     if not query:
         return {"memories": [], "count": 0}
     if mem0_available():
-        results = mem0_search_memories(query, limit=limit)
+        results = mem0_search_memories(query, user_id=uid, limit=limit)
         return {"memories": results, "count": len(results)}
     # Fallback: keyword filter PostgreSQL facts
     q = query.lower()
@@ -1081,9 +1106,10 @@ async def delete_memory(memory_id: str, current_user: TokenPayload = Depends(get
 
 @app.get("/api/v1/athena/memories/count")
 async def memory_count(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """Get the count of stored memories."""
+    """Get the count of stored memories for the current user."""
+    uid = current_user.sub if current_user else ""
     if mem0_available():
-        return {"count": mem0_memory_count(), "enabled": True}
+        return {"count": mem0_memory_count(user_id=uid), "enabled": True}
     count = len(_facts_to_memories())
     return {"count": count, "enabled": False}
 
