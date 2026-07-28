@@ -173,13 +173,13 @@ export default function DashboardPage() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Zap className="h-5 w-5 text-brand-500" />
-                AI Recommendations
+          <Card className="bg-amber-50/40 border-amber-100/50 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-amber-900">
+                <Zap className="h-5 w-5 text-amber-600" />
+                Daily Briefing
               </CardTitle>
-              <CardDescription>Prioritized actions from your AI agents</CardDescription>
+              <CardDescription className="text-amber-700/70">Prioritized actions and insights from Athena</CardDescription>
             </CardHeader>
             <CardContent>
               {loading ? (
@@ -195,7 +195,7 @@ export default function DashboardPage() {
                       {[1, 2, 3].map((i) => <RecommendationCard key={i} loading />)}
                     </div>
                   ) : recommendations.length === 0 ? (
-                    <p className="text-sm text-gray-400 py-4 text-center">No recommendations yet. Start using Athena to get insights.</p>
+                    <p className="text-sm text-amber-600/60 py-4 text-center">No recommendations yet. Start using Athena to get insights.</p>
                   ) : (
                     recommendations.map((rec: any, i: number) => (
                       <RecommendationCard
@@ -216,10 +216,10 @@ export default function DashboardPage() {
         </div>
 
         <div className="space-y-4">
-          <Card>
-            <CardHeader>
+          <Card className="bg-white/70 border-gray-200/60 shadow-sm">
+            <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2">
-                <Zap className="h-5 w-5 text-brand-500" />
+                <Zap className="h-5 w-5 text-amber-600" />
                 AI Agent Activity
               </CardTitle>
               <CardDescription>Recent actions from your team</CardDescription>
@@ -256,10 +256,10 @@ function EmailWidget() {
   if (loading) return null;
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="bg-white/70 border-gray-200/60 shadow-sm">
+      <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2">
-          <Inbox className="h-5 w-5 text-brand-500" />
+          <Inbox className="h-5 w-5 text-amber-600" />
           Recent Emails
         </CardTitle>
         <CardDescription>Latest inbox messages</CardDescription>
