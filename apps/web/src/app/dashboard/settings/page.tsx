@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Bot, Bell, Shield, CreditCard, Globe, Palette, Webhook, Key, Save, User, Building2, Eye, EyeOff, CheckCircle, XCircle, RefreshCw, Loader2, ExternalLink, Mail } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com/api/v1";
 
 interface BotStatus {
   telegram: { configured: boolean; env_token_set: boolean; db_configured: boolean; db_config: Record<string, any> };

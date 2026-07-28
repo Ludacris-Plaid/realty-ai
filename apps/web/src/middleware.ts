@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const publicPaths = new Set(["/", "/login", "/signup"]);
-const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const apiBase = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com";
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

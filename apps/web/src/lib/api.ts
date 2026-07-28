@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com";
 
 /** Inject JWT auth token from localStorage into every request */
 function authHeaders(): Record<string, string> {

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Brain, Search, Trash2, Loader2, Database, Zap, RefreshCw, AlertCircle, BookOpen } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://realty-api.indicationsmedia.com";
 
 /** Inject JWT token from localStorage into fetch headers */
 function authHeaders(): Record<string, string> {
