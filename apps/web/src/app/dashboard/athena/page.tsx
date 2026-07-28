@@ -10,9 +10,18 @@ import { Separator } from "@/components/ui/separator";
 import {
   Send, Bot, Cpu, Activity, Brain, Book, Zap, User, BarChart, Globe,
   MessageSquare, Sparkles, Heart, Copy, Check, Clock, CornerDownLeft,
-  ChevronDown, X, RotateCcw, History,
+  ChevronDown, X, RotateCcw, History, Trash2, Pencil, Check as CheckIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+interface Conversation {
+  id: string;
+  title: string;
+  is_active: boolean;
+  created_at: string;
+  message_count: number;
+  last_message: string;
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────
 
@@ -222,6 +231,11 @@ function AthenaPageContent() {
   const [activeView, setActiveView] = useState<"chat" | "overview" | "memory">("chat");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [initialGreetingShown, setInitialGreetingShown] = useState(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [editingConvId, setEditingConvId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [showConvList, setShowConvList] = useState(false);
+  const [loadingConversations, setLoadingConversations] = useState(false);
   const chatEnd = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sentFromQuery = useRef(false);
@@ -273,8 +287,64 @@ function AthenaPageContent() {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         }]);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        setLoading(false);
+        loadConversations();
+      });
   }, []);
+
+  const loadConversations = async () => {
+    setLoadingConversations(true);
+    try {
+      const res = await fetchFromApi<{ conversations: Conversation[] }>("/api/v1/athena/conversations");
+      if (res?.conversations) setConversations(res.conversations);
+    } catch { /* ignore */ }
+    setLoadingConversations(false);
+  };
+
+  const switchConversation = async (convId: string) => {
+    try {
+      const res = await fetchFromApi<{ conversation_id: string; messages: ChatMessage[] }>(`/api/v1/athena/conversations/${convId}/messages`);
+      if (res) {
+        setConversationId(res.conversation_id);
+        if (res.messages && res.messages.length > 0) {
+          setMessages(res.messages);
+        } else {
+          setMessages([{
+            role: "assistant",
+            content: `${getGreeting()}. What can I help you with?`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }]);
+        }
+        setShowConvList(false);
+      }
+    } catch {
+      // fallback
+    }
+  };
+
+  const renameConversation = async (convId: string, title: string) => {
+    try {
+      await fetchFromApi(`/api/v1/chat/conversations/${convId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+      });
+      setConversations(prev => prev.map(c => c.id === convId ? { ...c, title } : c));
+      setEditingConvId(null);
+    } catch { /* ignore */ }
+  };
+
+  const deleteConversation = async (convId: string) => {
+    if (!window.confirm("Delete this conversation? Memories and facts won't be affected.")) return;
+    try {
+      await fetchFromApi(`/api/v1/chat/conversations/${convId}`, { method: "DELETE" });
+      setConversations(prev => prev.filter(c => c.id !== convId));
+      if (conversationId === convId) {
+        // Current conversation was deleted — start fresh
+        newConversation();
+      }
+    } catch { /* ignore */ }
+  };
 
   // Auto-scroll
   useEffect(() => {
@@ -317,7 +387,11 @@ function AthenaPageContent() {
         body: JSON.stringify(body),
       });
       // Update conversation_id if backend returns one
-      if (res.conversation_id) setConversationId(res.conversation_id);
+      if (res.conversation_id) {
+        setConversationId(res.conversation_id);
+        // Refresh conv list to pick up auto-generated title
+        loadConversations();
+      }
       setMessages((m) => [...m, {
         role: "assistant",
         content: res.response,
@@ -389,48 +463,146 @@ function AthenaPageContent() {
   // ─── Render ───────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] flex-col">
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between pb-3 mb-4 border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 shadow-md">
-            <Brain className="h-6 w-6 text-white" />
+    <div className="flex h-[calc(100vh-6rem)] gap-4">
+      {/* ── Conversation Sidebar ── */}
+      <div className={cn(
+        "flex-shrink-0 transition-all duration-300 overflow-hidden",
+        showConvList ? "w-72" : "w-0"
+      )}>
+        <div className="h-full w-72 rounded-xl border border-gray-200 bg-white shadow-sm flex flex-col">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <History className="h-4 w-4 text-amber-500" />
+              Conversations
+            </h2>
+            <button onClick={() => setShowConvList(false)} className="text-gray-400 hover:text-gray-600 transition-colors">
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">Athena</h1>
-            <p className="text-[11px] text-gray-500">Your digital secretary — always learning, always here</p>
+          <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            {loadingConversations ? (
+              <div className="flex justify-center py-8">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+              </div>
+            ) : conversations.length === 0 ? (
+              <div className="flex flex-col items-center py-8 text-gray-400">
+                <MessageSquare className="h-6 w-6 mb-2" />
+                <p className="text-xs">No past conversations</p>
+              </div>
+            ) : (
+              conversations.map((conv) => (
+                <div key={conv.id}
+                  className={cn(
+                    "group flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all cursor-pointer",
+                    conv.id === conversationId
+                      ? "bg-amber-50 text-amber-800 border border-amber-200"
+                      : "text-gray-600 hover:bg-gray-50 border border-transparent"
+                  )}
+                >
+                  <div className="flex-1 min-w-0" onClick={() => {
+                    if (conv.id !== conversationId) switchConversation(conv.id);
+                  }}>
+                    {editingConvId === conv.id ? (
+                      <form onSubmit={(e) => { e.preventDefault(); renameConversation(conv.id, editTitle); }}
+                        className="flex items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          value={editTitle}
+                          onChange={(e) => setEditTitle(e.target.value)}
+                          className="flex-1 rounded border border-amber-300 px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-amber-400"
+                          autoFocus
+                        />
+                        <button type="submit" className="text-amber-600 hover:text-amber-800">
+                          <CheckIcon className="h-3.5 w-3.5" />
+                        </button>
+                        <button type="button" onClick={() => setEditingConvId(null)} className="text-gray-400 hover:text-gray-600">
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </form>
+                    ) : (
+                      <>
+                        <p className="text-xs font-medium truncate">{conv.title}</p>
+                        <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                          {conv.last_message?.slice(0, 60) || `${conv.message_count} messages`}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                  {editingConvId !== conv.id && (
+                    <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setEditingConvId(conv.id); setEditTitle(conv.title); }}
+                        className="p-1 rounded text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                        title="Rename"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id); }}
+                        className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
-        </div>
-        <div className="flex gap-1">
-          <button onClick={() => setActiveView("chat")}
-            className={cn(
-              "px-4 py-2 text-sm font-medium rounded-lg transition-all",
-              activeView === "chat" ? "bg-amber-100 text-amber-700 shadow-sm" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-            )}>
-            <MessageSquare className="h-4 w-4 inline mr-1.5" />Chat
-          </button>
-          <button onClick={() => setActiveView("overview")}
-            className={cn(
-              "px-4 py-2 text-sm font-medium rounded-lg transition-all",
-              activeView === "overview" ? "bg-amber-100 text-amber-700 shadow-sm" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-            )}>
-            <BarChart className="h-4 w-4 inline mr-1.5" />Overview
-          </button>
-          <button onClick={() => setActiveView("memory")}
-            className={cn(
-              "px-4 py-2 text-sm font-medium rounded-lg transition-all",
-              activeView === "memory" ? "bg-amber-100 text-amber-700 shadow-sm" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-            )}>
-            <Book className="h-4 w-4 inline mr-1.5" />Memory
-          </button>
-          <div className="w-px bg-gray-200 mx-1" />
-          <button onClick={newConversation} disabled={chatting}
-            className="px-3 py-2 text-sm font-medium rounded-lg text-gray-500 hover:text-amber-700 hover:bg-amber-50 transition-all"
-            title="Start a new conversation">
-            <RotateCcw className="h-4 w-4 inline mr-1" />New
-          </button>
         </div>
       </div>
+
+      {/* ── Main Chat Area ── */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between pb-3 mb-4 border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setShowConvList(!showConvList)}
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-all"
+              title="Conversation history"
+            >
+              <History className="h-5 w-5" />
+            </button>
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-amber-600 shadow-md">
+              <Brain className="h-6 w-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">Athena</h1>
+              <p className="text-[11px] text-gray-500">Your digital secretary — always learning, always here</p>
+            </div>
+          </div>
+          <div className="flex gap-1">
+            <button onClick={() => setActiveView("chat")}
+              className={cn(
+                "px-4 py-2 text-sm font-medium rounded-lg transition-all",
+                activeView === "chat" ? "bg-amber-100 text-amber-700 shadow-sm" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              )}>
+              <MessageSquare className="h-4 w-4 inline mr-1.5" />Chat
+            </button>
+            <button onClick={() => setActiveView("overview")}
+              className={cn(
+                "px-4 py-2 text-sm font-medium rounded-lg transition-all",
+                activeView === "overview" ? "bg-amber-100 text-amber-700 shadow-sm" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              )}>
+              <BarChart className="h-4 w-4 inline mr-1.5" />Overview
+            </button>
+            <button onClick={() => setActiveView("memory")}
+              className={cn(
+                "px-4 py-2 text-sm font-medium rounded-lg transition-all",
+                activeView === "memory" ? "bg-amber-100 text-amber-700 shadow-sm" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              )}>
+              <Book className="h-4 w-4 inline mr-1.5" />Memory
+            </button>
+            <div className="w-px bg-gray-200 mx-1" />
+            <button onClick={newConversation} disabled={chatting}
+              className="px-3 py-2 text-sm font-medium rounded-lg text-gray-500 hover:text-amber-700 hover:bg-amber-50 transition-all"
+              title="Start a new conversation">
+              <RotateCcw className="h-4 w-4 inline mr-1" />New
+            </button>
+          </div>
+        </div>
 
       {/* ── CHAT VIEW ── */}
       {activeView === "chat" && (

@@ -500,6 +500,14 @@ class AthenaAgent:
         # Save user message
         save_message(self.conversation_id, "user", message)
         
+        # Auto-generate conversation title from first user message
+        if past_msgs and len(past_msgs) < 2:
+            title = message.strip()[:60]
+            if len(title) > 55:
+                title = title[:55] + "..."
+            from .memory import update_conversation_title
+            update_conversation_title(self.conversation_id, title)
+        
         messages.append(HumanMessage(content=message))
         
         try:

@@ -42,7 +42,7 @@ from approval import get_pending_approvals, approve as approve_action, reject as
 # ─── Athena Agent ──────────────────────────────────────────────────────────────
 from hermes.agent import get_athena
 from hermes.tools import TOOL_DEFINITIONS
-from hermes.memory import profile_summary, get_user_profile, recall, save_note, search_notes, get_skills, search_conversations as search_memory_conversations, get_conversation_messages as get_mem_conversation_messages, list_conversations as list_mem_conversations, get_bot_config, save_bot_config, delete_bot_config, list_bot_configs
+from hermes.memory import profile_summary, get_user_profile, recall, save_note, search_notes, get_skills, search_conversations as search_memory_conversations, get_conversation_messages as get_mem_conversation_messages, list_conversations as list_mem_conversations, get_bot_config, save_bot_config, delete_bot_config, list_bot_configs, get_or_create_active_conversation
 from hermes.mem0_adapter import search_memories as mem0_search_memories, get_all_memories as mem0_get_all_memories, delete_memory as mem0_delete_memory, get_user_memory_count as mem0_memory_count, is_available as mem0_available
 from hermes.tools import TOOL_DEFINITIONS
 
@@ -833,14 +833,20 @@ async def athena_system_overview(current_user: Optional[TokenPayload] = Depends(
 
 @app.get("/api/v1/athena/conversations")
 async def list_athena_conversations(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """List all past conversation threads."""
-    return {"conversations": list_mem_conversations()}
+    """List all past conversation threads for the current user."""
+    user_id = current_user.sub if current_user else ""
+    return {"conversations": list_mem_conversations(user_id=user_id)}
 
 
 @app.get("/api/v1/athena/conversations/current")
 async def get_current_conversation(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
-    """Get active conversation with its messages."""
+    """Get active conversation with its messages, scoped to the current user."""
     agent = _get_athena()
+    user_id = current_user.sub if current_user else ""
+    # Ensure agent's conversation matches user — re-scope if needed
+    if user_id and user_id != agent.user_id:
+        agent.user_id = user_id
+        agent.conversation_id = get_or_create_active_conversation(user_id)
     messages = get_mem_conversation_messages(agent.conversation_id)
     return {"conversation_id": agent.conversation_id, "messages": messages}
 
@@ -856,7 +862,8 @@ async def get_conversation_messages_endpoint(conv_id: str, current_user: Optiona
 async def new_conversation(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
     """Start a fresh conversation. The old one is preserved and can be reviewed later."""
     agent = _get_athena()
-    new_id = agent.new_conversation()
+    user_id = current_user.sub if current_user else ""
+    new_id = agent.new_conversation(user_id=user_id)
     return {"conversation_id": new_id, "message": "Fresh start. I'm ready for you."}
 
 
