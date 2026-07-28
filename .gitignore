@@ -19,3 +19,4 @@ data/
 .vercel
 railway.json
 railway.toml
+.env*
