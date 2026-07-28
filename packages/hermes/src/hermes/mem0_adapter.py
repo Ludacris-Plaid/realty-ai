@@ -112,21 +112,18 @@ def _build_embedder_config():
 def _build_llm_config():
     """Build LLM config for Mem0 entity extraction.
 
-    Tries DeepSeek first (DEEPSEEK_API_KEY), falls back to OpenAI.
-    Provider options (MEM0_LLM_PROVIDER):
-      - openai (default): reads OPENAI_API_KEY + OPENAI_BASE_URL
-      - ollama: uses local Ollama
+    Uses LLM_API_KEY/LLM_API_BASE/LLM_DEFAULT_MODEL from agent env vars,
+    falling back to Featherless API.
     """
     from mem0.llms.configs import LlmConfig
     provider = os.environ.get("MEM0_LLM_PROVIDER", "openai").lower()
-    model = os.environ.get("MEM0_LLM_MODEL", "gpt-4o-mini" if provider == "openai" else "llama3.2")
+    model = os.environ.get("LLM_DEFAULT_MODEL", os.environ.get("MEM0_LLM_MODEL", "deepseek-v4-flash-free"))
     config = {"model": model, "temperature": 0.1}
 
-    # Auto-configure DeepSeek when DEEPSEEK_API_KEY is set but OPENAI_API_KEY isn't
-    ds_key = os.environ.get("DEEPSEEK_API_KEY", "")
-    if provider == "openai" and ds_key and not os.environ.get("OPENAI_API_KEY"):
-        config["api_key"] = ds_key
-        config["base_url"] = os.environ.get("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
+    api_key = os.environ.get("LLM_API_KEY", "rc_39469c71f02a6f4d905bace1fff05adee3228beca9a0ddb85898ea20438d8435")
+    api_base = os.environ.get("LLM_API_BASE", "https://api.featherless.ai/v1")
+    config["api_key"] = api_key
+    config["base_url"] = api_base
 
     return LlmConfig(provider=provider, config=config)
 
@@ -159,6 +156,7 @@ def _create_mem0_instance():
             embed_provider = embedder.provider
             embed_model = embedder.config.get("model", "unknown")
             
+            llm_config = _build_llm_config()
             config = MemoryConfig(
                 vector_store=VectorStoreConfig(
                     provider="qdrant",
@@ -170,7 +168,7 @@ def _create_mem0_instance():
                     },
                 ),
                 embedder=embedder,
-                llm=LlmConfig(provider="openai", config={"model": "deepseek-v4-flash", "temperature": 0.1, "api_key": "sk-c9b2042435c3493e8a57082e2d692b8a", "openai_base_url": "https://api.deepseek.com/v1"}),
+                llm=llm_config,
                 history_db_path="/data/mem0_history.db",
                 version="v1.1",
             )
@@ -231,7 +229,7 @@ def add_interaction(user_message: str, assistant_response: str, user_id: str = D
             messages,
             user_id=user_id,
             metadata=metadata or {"source": "chat"},
-            infer=False,
+            infer=True,
         )
         return True
     except Exception as e:
