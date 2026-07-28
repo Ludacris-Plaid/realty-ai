@@ -423,37 +423,39 @@ def sync_emails(current_user: TokenPayload = Depends(require_user)):
                     text("SELECT id FROM synced_emails WHERE user_id = :uid AND gmail_message_id = :gid"),
                     {"uid": current_user.sub, "gid": mock["gmail_message_id"]},
                 ).fetchone()
-                if not existing:
-                    session.execute(
-                        text("""
-                            INSERT INTO synced_emails
-                                (id, user_id, gmail_message_id, thread_id, subject, sender, sender_name,
-                                 snippet, body, label_ids, is_unread, received_at,
-                                 ai_classification, ai_suggested_action, ai_draft_reply, created_at)
-                            VALUES
-                                (:id, :uid, :gid, :tid, :subj, :sender, :sname,
-                                 :snippet, :body, :labels, :unread, :received,
-                                 :classification, :action, :draft, NOW())
-                        """),
-                        {
-                            "id": mock["id"],
-                            "uid": current_user.sub,
-                            "gid": mock["gmail_message_id"],
-                            "tid": mock["thread_id"],
-                            "subj": mock["subject"],
-                            "sender": mock["sender"],
-                            "sname": mock["sender_name"],
-                            "snippet": mock["snippet"],
-                            "body": mock["body"],
-                            "labels": json.dumps(mock["label_ids"]),
-                            "unread": mock["is_unread"],
-                            "received": mock["received_at"],
-                            "classification": mock.get("ai_classification"),
-                            "action": mock.get("ai_suggested_action"),
-                            "draft": mock.get("ai_draft_reply", ""),
-                        },
-                    )
-                    count += 1
+                if existing:
+                    continue
+                email_id = str(uuid.uuid4())
+                session.execute(
+                    text("""
+                        INSERT INTO synced_emails
+                            (id, user_id, gmail_message_id, thread_id, subject, sender, sender_name,
+                             snippet, body, label_ids, is_unread, received_at,
+                             ai_classification, ai_suggested_action, ai_draft_reply, created_at)
+                        VALUES
+                            (:id, :uid, :gid, :tid, :subj, :sender, :sname,
+                             :snippet, :body, :labels, :unread, :received,
+                             :classification, :action, :draft, NOW())
+                    """),
+                    {
+                        "id": email_id,
+                        "uid": current_user.sub,
+                        "gid": mock["gmail_message_id"],
+                        "tid": mock["thread_id"],
+                        "subj": mock["subject"],
+                        "sender": mock["sender"],
+                        "sname": mock["sender_name"],
+                        "snippet": mock["snippet"],
+                        "body": mock["body"],
+                        "labels": json.dumps(mock["label_ids"]),
+                        "unread": mock["is_unread"],
+                        "received": mock["received_at"],
+                        "classification": mock.get("ai_classification"),
+                        "action": mock.get("ai_suggested_action"),
+                        "draft": mock.get("ai_draft_reply", ""),
+                    },
+                )
+                count += 1
                 session.commit()
         return SyncResponse(
             status="mock",
@@ -792,6 +794,22 @@ def approve_draft(
         session.commit()
 
     return {"status": "approved", "sent": sent, "recipient": row[0], "subject": row[1]}
+
+
+@router.delete("/drafts/{draft_id}")
+def delete_draft(
+    draft_id: str,
+    current_user: TokenPayload = Depends(require_user),
+):
+    """Delete an AI-generated draft reply."""
+    with Session(_shared_engine) as session:
+        session.execute(
+            text("UPDATE synced_emails SET ai_draft_reply = NULL, ai_suggested_action = 'deleted' "
+                 "WHERE id = :id AND user_id = :uid"),
+            {"id": draft_id, "uid": current_user.sub},
+        )
+        session.commit()
+    return {"status": "deleted"}
 
 
 @router.post("/drafts/{draft_id}/reject")
