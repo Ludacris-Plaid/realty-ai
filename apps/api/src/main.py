@@ -98,7 +98,7 @@ async def health():
 
     # DB check
     try:
-        db_url = os.environ.get("DATABASE_URL", "").replace("+asyncpg", "")
+        db_url = os.environ.get("DATABASE_URL", "").replace("+asyncpg", "").replace("postgresql2://", "postgresql://")
         if db_url:
             from sqlalchemy import create_engine, text
             engine = create_engine(db_url)
@@ -252,7 +252,7 @@ async def seed_database(current_user: TokenPayload = Depends(get_current_user)):
         from sqlalchemy import create_engine, text
         from .config import settings
         
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         
         with engine.connect() as conn:
@@ -288,6 +288,18 @@ async def seed_database(current_user: TokenPayload = Depends(get_current_user)):
                     model_used TEXT DEFAULT 'fast-model',
                     status TEXT DEFAULT 'success',
                     metadata JSONB DEFAULT '{}',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS reminders (
+                    id UUID PRIMARY KEY,
+                    user_id UUID,
+                    event_id TEXT,
+                    title TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    remind_at TIMESTAMPTZ NOT NULL,
+                    status TEXT DEFAULT 'pending',
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """))
@@ -346,7 +358,7 @@ def _get_athena():
         from sqlalchemy import create_engine
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url) if db_url else None
         athena_agent = get_athena(db_engine=engine)
     return athena_agent
@@ -406,7 +418,7 @@ async def scrape_endpoint(body: ScrapeRequest, current_user: TokenPayload = Depe
     try:
         from hermes.scraper import scrape_and_seed
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         result = scrape_and_seed(
             location=body.location,
             count=max(body.count, 5),
@@ -441,7 +453,7 @@ async def list_events(current_user: Optional[TokenPayload] = Depends(get_current
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         events = []
 
@@ -517,7 +529,7 @@ async def list_campaigns(current_user: Optional[TokenPayload] = Depends(get_curr
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             if uid:
@@ -574,7 +586,7 @@ async def update_profile(body: ProfileUpdate, current_user: TokenPayload = Depen
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
 
         with Session(engine) as session:
@@ -643,7 +655,7 @@ async def dashboard_recommendations(current_user: Optional[TokenPayload] = Depen
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             if uid:
@@ -795,7 +807,7 @@ async def athena_system_overview(current_user: Optional[TokenPayload] = Depends(
         from sqlalchemy import create_engine
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         if db_url:
             engine = create_engine(db_url)
             with Session(engine) as session:
@@ -816,7 +828,7 @@ async def athena_system_overview(current_user: Optional[TokenPayload] = Depends(
             from sqlalchemy import create_engine, text
             from sqlalchemy.orm import Session
             from .config import settings
-            db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+            db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
             if db_url:
                 engine = create_engine(db_url)
                 with Session(engine) as session:
@@ -1214,7 +1226,7 @@ async def briefing_v1(current_user: Optional[TokenPayload] = Depends(get_current
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             if uid:
@@ -1328,7 +1340,7 @@ async def clients_list(search: str = "", current_user: Optional[TokenPayload] = 
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             query = "SELECT id, agent_id, first_name, last_name, email, phone, type, budget, location_interest, notes, ai_score, ai_score_reason, created_at, updated_at FROM clients"
@@ -1358,7 +1370,7 @@ async def clients_get(client_id: str, current_user: Optional[TokenPayload] = Dep
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             row = session.execute(
@@ -1382,7 +1394,7 @@ async def clients_create(body: dict, current_user: TokenPayload = Depends(get_cu
         from sqlalchemy.orm import Session
         from .config import settings
         import uuid as _uuid
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             cid = _uuid.uuid4()
@@ -1427,7 +1439,7 @@ async def clients_update(client_id: str, body: dict, current_user: TokenPayload 
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             updates = []
@@ -1482,7 +1494,7 @@ async def clients_delete(client_id: str, current_user: TokenPayload = Depends(ge
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             session.execute(text("DELETE FROM clients WHERE id = :id"), {"id": client_id})
@@ -1502,7 +1514,7 @@ async def tasks_list(status: str = "", client_id: str = "", current_user: Option
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             query = "SELECT id, title, description, priority, status, client_id, due_date, created_at FROM tasks WHERE 1=1"
@@ -1540,7 +1552,7 @@ async def tasks_create(body: dict, current_user: TokenPayload = Depends(get_curr
         from sqlalchemy.orm import Session
         from .config import settings
         import uuid as _uuid
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             tid = _uuid.uuid4()
@@ -1566,7 +1578,7 @@ async def tasks_update(task_id: str, body: dict, current_user: TokenPayload = De
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             updates = []
@@ -1593,7 +1605,7 @@ async def calendar_all(days: int = 7, current_user: Optional[TokenPayload] = Dep
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         events = []
         tasks_list = []
@@ -1683,7 +1695,7 @@ async def calendar_sync(current_user: TokenPayload = Depends(get_current_user)):
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         count = 0
         with Session(engine) as session:
@@ -1730,7 +1742,7 @@ async def calendar_create_event(body: dict, current_user: TokenPayload = Depends
         from sqlalchemy.orm import Session
         from .config import settings
         import uuid as _uuid
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             eid = _uuid.uuid4()
@@ -1755,7 +1767,7 @@ async def calendar_update_event(event_id: str, body: dict, current_user: TokenPa
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             updates = []
@@ -1788,10 +1800,159 @@ async def calendar_delete_event(event_id: str, current_user: TokenPayload = Depe
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             session.execute(text("DELETE FROM showings WHERE id = :id AND user_id = :uid"), {"id": event_id, "uid": current_user.sub})
+            session.commit()
+        return {"status": "deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Reminders ──────────────────────────────────────────────────────────
+
+
+class ReminderOut(BaseModel):
+    id: str
+    event_id: str
+    title: str
+    description: str
+    remind_at: str
+    status: str
+    created_at: str
+
+
+@app.get("/api/v1/calendar/reminders")
+async def list_reminders(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """List pending reminders for the current user."""
+    uid = current_user.sub if current_user else None
+    if not uid:
+        return {"reminders": []}
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            rows = session.execute(
+                text("""
+                    SELECT id, event_id, title, description, remind_at, status, created_at
+                    FROM reminders
+                    WHERE user_id = :uid AND status = 'pending'
+                    ORDER BY remind_at ASC LIMIT 20
+                """),
+                {"uid": uid}
+            ).fetchall()
+            reminders = []
+            for r in rows:
+                reminders.append({
+                    "id": str(r[0]), "event_id": str(r[1]) if r[1] else "",
+                    "title": r[2], "description": r[3] or "",
+                    "remind_at": str(r[4]) if r[4] else "",
+                    "status": r[5], "created_at": str(r[6]) if r[6] else "",
+                })
+            return {"reminders": reminders}
+    except Exception as e:
+        logger.warning(f"Reminders list error: {e}")
+        return {"reminders": []}
+
+
+@app.get("/api/v1/calendar/reminders/all")
+async def list_all_reminders(current_user: Optional[TokenPayload] = Depends(get_current_user_optional)):
+    """List all reminders (pending + dismissed) for history."""
+    uid = current_user.sub if current_user else None
+    if not uid:
+        return {"reminders": []}
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            rows = session.execute(
+                text("SELECT id, event_id, title, description, remind_at, status, created_at FROM reminders WHERE user_id = :uid ORDER BY remind_at DESC LIMIT 50"),
+                {"uid": uid}
+            ).fetchall()
+            reminders = []
+            for r in rows:
+                reminders.append({
+                    "id": str(r[0]), "event_id": str(r[1]) if r[1] else "",
+                    "title": r[2], "description": r[3] or "",
+                    "remind_at": str(r[4]) if r[4] else "",
+                    "status": r[5], "created_at": str(r[6]) if r[6] else "",
+                })
+            return {"reminders": reminders}
+    except Exception as e:
+        logger.warning(f"Reminders all error: {e}")
+        return {"reminders": []}
+
+
+@app.post("/api/v1/calendar/reminders")
+async def create_reminder(body: dict, current_user: TokenPayload = Depends(get_current_user)):
+    """Create a reminder for a calendar event."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        import uuid as _uuid
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
+        engine = create_engine(db_url)
+        rid = _uuid.uuid4()
+        with Session(engine) as session:
+            session.execute(text("""
+                INSERT INTO reminders (id, user_id, event_id, title, description, remind_at, status, created_at)
+                VALUES (:id, :uid, :eid, :title, :desc, :remind_at, 'pending', NOW())
+            """), {
+                "id": str(rid), "uid": current_user.sub,
+                "eid": body.get("event_id", ""),
+                "title": body.get("title", "Reminder"),
+                "desc": body.get("description", ""),
+                "remind_at": body.get("remind_at", ""),
+            })
+            session.commit()
+        return {"id": str(rid), "status": "created"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/v1/calendar/reminders/{reminder_id}")
+async def dismiss_reminder(reminder_id: str, body: dict, current_user: TokenPayload = Depends(get_current_user)):
+    """Dismiss or update a reminder."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            new_status = body.get("status", "dismissed")
+            session.execute(
+                text("UPDATE reminders SET status = :status WHERE id = :id AND user_id = :uid"),
+                {"status": new_status, "id": reminder_id, "uid": current_user.sub},
+            )
+            session.commit()
+        return {"status": "updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/v1/calendar/reminders/{reminder_id}")
+async def delete_reminder(reminder_id: str, current_user: TokenPayload = Depends(get_current_user)):
+    """Delete a reminder."""
+    try:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import Session
+        from .config import settings
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
+        engine = create_engine(db_url)
+        with Session(engine) as session:
+            session.execute(
+                text("DELETE FROM reminders WHERE id = :id AND user_id = :uid"),
+                {"id": reminder_id, "uid": current_user.sub},
+            )
             session.commit()
         return {"status": "deleted"}
     except Exception as e:
@@ -1810,7 +1971,7 @@ async def global_search(q: str = "", current_user: Optional[TokenPayload] = Depe
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             # Search clients
@@ -1932,7 +2093,7 @@ async def memories_alias(
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import Session
     from .config import settings
-    db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+    db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
     engine = create_engine(db_url)
     query = "SELECT id, user_id, client_id, category, key, value, created_at FROM athena_facts WHERE 1=1"
     params = {}
@@ -1967,7 +2128,7 @@ async def memories_create(data: dict, current_user: TokenPayload = Depends(get_c
         from sqlalchemy.orm import Session
         from .config import settings
         import uuid as _uuid
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         unique_key = f"{data.get('category', 'general')}_{_uuid.uuid4().hex[:8]}"
         with Session(engine) as session:
@@ -1997,7 +2158,7 @@ async def memories_update(memory_id: str, data: dict, current_user: TokenPayload
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             updates = []
@@ -2028,7 +2189,7 @@ async def memories_delete_alias(memory_id: str, current_user: TokenPayload = Dep
         from sqlalchemy import create_engine, text
         from sqlalchemy.orm import Session
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         engine = create_engine(db_url)
         with Session(engine) as session:
             session.execute(text("DELETE FROM athena_facts WHERE id = :id"), {"id": memory_id})
@@ -2073,7 +2234,7 @@ async def listings_scrape_alias(
     try:
         from hermes.scraper import scrape_and_seed
         from .config import settings
-        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '')
+        db_url = getattr(settings, 'database_url', '').replace('+asyncpg', '').replace('postgresql2://', 'postgresql://')
         result = scrape_and_seed(
             location=location, count=max(min(max_results, 50), 5),
             db_url=db_url, user_id=current_user.sub,
